@@ -1,0 +1,426 @@
+ <!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Matrix — Digit Over/Under</title>
+<style>
+:root{color-scheme:dark;--bg:#080d12;--card:#111922;--card2:#0c131b;--line:#293647;--text:#eef3f8;--muted:#92a0b2;--g:#31c48d;--r:#ff6677;--a:#f0b64d;--b:#63b3ed}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.wrap{max-width:920px;margin:auto;padding:14px}.card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:17px;margin-bottom:14px}
+h1{font-size:25px;margin:0 0 6px}h2{font-size:18px;margin:0 0 12px}.note,label{color:var(--muted);font-size:12px;line-height:1.45}
+.row{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+input,select{width:100%;padding:11px;border-radius:12px;border:1px solid var(--line);background:var(--card2);color:var(--text);font-size:15px}
+button{width:100%;padding:13px;border:0;border-radius:13px;margin-top:10px;font-weight:800;background:#238463;color:#04120d;font-size:15px}
+button.secondary{background:#263547;color:#e8eef5}button.danger{background:#5c2d39;color:#ffd8df}button.warn{background:#6b5223;color:#fff0c6}
+button{transition:background .12s,transform .08s,box-shadow .12s,filter .12s}
+button:active,button.tap-active{filter:brightness(1.45);transform:scale(.985);box-shadow:0 0 0 2px #eef3f855 inset}
+button.state-on{background:#31c48d!important;color:#04120d!important;box-shadow:0 0 0 2px #7ce0b855 inset}
+button.state-off{background:#5c2d39!important;color:#ffd8df!important}
+select:focus,input:focus{outline:2px solid #63b3ed;border-color:#63b3ed}
+.grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stat{padding:11px;border:1px solid var(--line);border-radius:13px;background:var(--card2)}
+.k{font-size:11px;color:var(--muted)}.v{font-size:19px;font-weight:850;margin-top:3px}.good{color:var(--g)}.bad{color:var(--r)}.amber{color:var(--a)}
+.mode{display:none}.mode.active{display:block}.pill{display:inline-flex;padding:6px 10px;border:1px solid var(--line);border-radius:999px;color:var(--muted);font-size:12px;font-weight:800}
+.safeBox{padding:9px 11px;border:1px solid #256b55;border-radius:12px;background:#0c241d;color:#7ce0b8;font-weight:850;font-size:12px}
+.safeBox.unsafe{border-color:#7a4c2a;background:#2c1d0d;color:#ffc66c}
+canvas{width:100%;height:125px;background:#091018;border:1px solid var(--line);border-radius:13px;display:block}
+table{width:100%;border-collapse:collapse;font-size:12px}td,th{padding:7px;border-bottom:1px solid #213040;text-align:left}th{color:var(--muted)}
+.switchline{display:flex;gap:8px;align-items:center}.switchline input{width:auto}
+@media(max-width:680px){.row,.row3{grid-template-columns:1fr}.grid{grid-template-columns:repeat(2,1fr)}.wrap{padding:9px}}
+</style>
+
+<style>
+:root{
+ --bg:#05080d;--card:rgba(15,24,34,.82);--card2:rgba(8,16,25,.88);
+ --line:rgba(112,144,170,.22);--text:#f4f8fb;--muted:#91a4b7;
+ --g:#2ee6a6;--r:#ff647c;--a:#ffc35c;--b:#66bfff;
+}
+html{background:#05080d}
+body{
+ min-height:100vh;
+ background:
+ radial-gradient(circle at 15% 0%,rgba(38,198,142,.14),transparent 34%),
+ radial-gradient(circle at 95% 10%,rgba(65,145,255,.13),transparent 32%),
+ linear-gradient(160deg,#05080d 0%,#07111a 48%,#05090f 100%);
+ background-attachment:fixed;
+}
+.wrap{max-width:960px;padding:16px}
+.card{
+ position:relative;overflow:hidden;
+ background:linear-gradient(145deg,rgba(17,28,39,.92),rgba(8,15,23,.88));
+ border:1px solid rgba(119,157,187,.22);
+ box-shadow:0 18px 45px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.025);
+ backdrop-filter:blur(12px);
+ border-radius:22px;padding:18px;margin-bottom:15px;
+}
+.card:before{
+ content:"";position:absolute;left:0;top:0;width:100%;height:1px;
+ background:linear-gradient(90deg,transparent,rgba(46,230,166,.55),transparent)
+}
+h1{font-size:27px;letter-spacing:-.5px;background:linear-gradient(90deg,#fff,#9ff7d8,#8bc7ff);
+ -webkit-background-clip:text;background-clip:text;color:transparent}
+h2{font-size:18px;letter-spacing:.15px}
+.note,label{color:#9aabba}
+input,select{
+ border:1px solid rgba(115,151,180,.24);
+ background:rgba(4,11,18,.78);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.025);
+}
+input:focus,select:focus{outline:none;border-color:#4fbca0;box-shadow:0 0 0 3px rgba(46,230,166,.10)}
+button{
+ border:1px solid rgba(255,255,255,.06);
+ background:linear-gradient(135deg,#22c88d,#3ee4ad);
+ color:#03110c;box-shadow:0 8px 24px rgba(46,230,166,.14);
+ letter-spacing:.2px
+}
+button.secondary{background:linear-gradient(135deg,#223548,#2e465e);color:#eef6fc}
+button.danger{background:linear-gradient(135deg,#572936,#753445);color:#ffe5ea}
+button.warn{background:linear-gradient(135deg,#d69a2e,#f5bd4d);color:#1b1202}
+button.state-on{background:linear-gradient(135deg,#1fcf91,#45efb6)!important;box-shadow:0 0 28px rgba(46,230,166,.24)}
+button.state-off{background:linear-gradient(135deg,#542633,#713244)!important}
+.stat{
+ background:linear-gradient(145deg,rgba(5,13,20,.92),rgba(12,22,31,.82));
+ border:1px solid rgba(112,144,170,.18);
+ box-shadow:inset 0 1px 0 rgba(255,255,255,.02)
+}
+.v{letter-spacing:-.25px}
+.pill{background:rgba(5,13,20,.72);border-color:rgba(102,191,255,.25)}
+.safeBox{
+ background:linear-gradient(135deg,rgba(15,82,61,.46),rgba(7,38,29,.72));
+ border-color:rgba(46,230,166,.42);color:#82f6ce;
+ box-shadow:0 0 24px rgba(46,230,166,.08)
+}
+.safeBox.unsafe{background:rgba(65,39,13,.55);border-color:rgba(255,195,92,.34)}
+canvas{background:linear-gradient(180deg,#07111a,#050b11);border-color:rgba(102,191,255,.18)}
+table{border-radius:14px;overflow:hidden}
+th{font-size:10px;text-transform:uppercase;letter-spacing:.75px}
+td{background:rgba(5,12,19,.32)}
+#start{font-size:16px}
+@media(max-width:680px){
+ .wrap{padding:9px}.card{padding:15px;border-radius:18px}
+ h1{font-size:23px}.v{font-size:17px}
+}
+</style>
+<style id="matrix-thunder-theme">
+:root{--bg:#040713;--card:#0b1426;--card2:#080f20;--line:rgba(78,142,255,.34);--text:#eef6ff;--muted:#a1b5d4;--g:#4de6ff;--r:#ff436c;--a:#ffd169;--b:#409bff}
+html{background:#040713}body{background:radial-gradient(ellipse at 12% 4%,rgba(22,102,255,.30),transparent 36%),radial-gradient(ellipse at 92% 32%,rgba(255,37,87,.17),transparent 42%),linear-gradient(145deg,#030611,#0a1230 48%,#09050f)!important;background-attachment:fixed!important}
+.card{background:linear-gradient(140deg,rgba(12,24,51,.96),rgba(10,13,30,.94))!important;border:1px solid rgba(66,146,255,.36)!important;box-shadow:0 14px 40px rgba(0,0,0,.38),0 0 22px rgba(30,111,255,.09),inset 0 1px 0 rgba(129,186,255,.12)!important}
+.card:before{height:2px!important;background:linear-gradient(90deg,transparent,#2d7fff,#d6f5ff,#ff315f,transparent)!important;box-shadow:0 0 16px rgba(63,143,255,.6)}
+h1{font-weight:950!important;font-size:clamp(25px,6vw,37px)!important;background:linear-gradient(105deg,#fff,#8feaff 36%,#528aff 66%,#ff5279)!important;-webkit-background-clip:text!important;background-clip:text!important;color:transparent!important;text-shadow:none;letter-spacing:-.8px!important}
+h2{color:#d6eaff}h2:before{content:'\26a1';margin-right:8px;color:#54baff;text-shadow:0 0 12px #348eff}
+.note,label{color:#a4b8d8!important}input,select{background:#050d20!important;border:1px solid rgba(78,142,255,.37)!important;color:#f3f8ff!important}input:focus,select:focus{border-color:#62c8ff!important;box-shadow:0 0 0 3px rgba(48,125,255,.18)!important}
+button:not(.danger):not(.secondary):not(.warn){background:linear-gradient(110deg,#155be8,#28b7ff)!important;color:white!important;box-shadow:0 7px 24px rgba(32,112,255,.27)!important}button.danger{background:linear-gradient(110deg,#831b48,#ef3e62)!important;color:#fff!important}button.secondary{background:linear-gradient(110deg,#132e62,#244c88)!important}
+button.state-on{background:linear-gradient(100deg,#155bff,#3acfff)!important;color:white!important}button.state-off{background:linear-gradient(100deg,#8c204a,#e33962)!important}
+.stat{background:linear-gradient(135deg,#07142d,#0d1026)!important;border-color:rgba(77,133,255,.32)!important}.v{color:#e7f6ff}.good{color:#46edcf!important}.bad{color:#ff5b7e!important}.pill{border-color:#378cff!important;color:#b8d7ff!important}.safeBox{background:rgba(22,83,143,.24)!important;border-color:#2b8cff!important;color:#8ddcff!important}.safeBox.unsafe{border-color:#ff5b7e!important;color:#ff9aad!important}
+canvas{background:linear-gradient(180deg,#061a39,#09091c)!important;border-color:#377fff!important}td{background:rgba(8,19,42,.36)!important}th{color:#94caff!important}
+.matrix-mark{display:inline-flex;align-items:center;gap:7px;color:#9acfff;font:800 11px ui-monospace,monospace;letter-spacing:1.5px;margin:0 0 9px}.matrix-mark:before{content:'\03df';font-size:22px;color:#ff5079;text-shadow:0 0 13px #ff4060}
+</style>
+
+<style>
+.live-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.live-actions button{margin-top:0;min-height:48px}
+#connect{background:linear-gradient(115deg,#9f1239 0%,#e11d48 48%,#f5c451 100%)!important;color:#fff!important;border:1px solid rgba(255,214,120,.7)!important;box-shadow:0 8px 24px rgba(225,29,72,.28),inset 0 1px 0 rgba(255,255,255,.2)!important}
+#start{background:linear-gradient(115deg,#1248c8 0%,#247bff 48%,#f5c451 100%)!important;color:#fff!important;border:1px solid rgba(255,214,120,.7)!important;box-shadow:0 8px 24px rgba(36,123,255,.28),inset 0 1px 0 rgba(255,255,255,.2)!important}
+#connect:disabled{opacity:.65}
+@media(max-width:420px){.live-actions{grid-template-columns:1fr}}
+</style>
+</head>
+<body><div class="wrap">
+<section class="card"><div class="matrix-mark">STORM SYSTEM // DIGIT OVER/UNDER</div><h1>Matrix</h1>
+<div class="note">⚡ THUNDER ENGINE · DIGIT OVER 4 · INSTANT MULTI-MARKET TRIGGER</div></section>
+
+<section class="card"><h2>1. Deriv connection</h2><div class="row3">
+<div><label>Deriv App ID</label><input id="appId" value="1089" placeholder="App ID"></div>
+<div><label>Deriv API Token</label><input id="pat" type="password" placeholder="Token with trade permission"></div>
+<div><label>Account</label><select id="accountMode"><option value="demo">DEMO</option><option value="real">REAL</option></select></div>
+</div><div class="note" style="margin-top:8px">Connect and start controls are available in the Live Cycle panel below.</div></section>
+
+<section id="rf" class="card mode active"><h2>Digit Over / Under — Last Digit Trigger</h2>
+<div class="row3">
+<div><label>Contract duration (minutes, leave blank for ticks)</label><input id="rfDurationMin" type="number" min="1" max="59" step="1" value="" placeholder="Blank = use ticks"></div>
+<div><label>Contract duration (ticks, initial 1)</label><input id="rfDurationTicks" type="number" min="1" step="1" value="1"></div>
+<div><label>Last digit barrier (initial 4)</label><select id="digitBarrier"><option>0</option><option>1</option><option>2</option><option>3</option><option selected>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></div>
+</div>
+<div class="row" style="margin-top:10px"><div><label>Contract strategy</label><select id="digitContract"><option value="DIGITOVER" selected>Digit Over</option><option value="DIGITUNDER">Digit Under</option></select></div><div><label>Market trigger</label><select id="digitTrigger"><option value="over" selected>Instantly trade when last digit is OVER barrier</option><option value="under">Instantly trade when last digit is UNDER barrier</option></select></div></div>
+<div class="row" style="margin-top:10px"><div><label>Market switching after every result</label><select id="switchAfterLoss"><option value="yes" selected>ON — switch market after win or loss</option><option value="no">OFF — allow same market again</option></select></div><div><label>Market selection</label><div class="note" style="padding:10px 0">After every win or loss, choose a different qualifying market whenever another market is available.</div></div></div>
+<div class="note" style="margin-top:8px">Default rule: monitor all eligible markets and request a Digit Over 4 contract immediately when the latest observed last digit is 5–9. This uses the arriving tick as the trigger; the contract is entered after that tick, not retroactively on it. All money-management controls below remain unchanged.</div></section>
+
+<section class="card"><h2>3. Live cycle & money management</h2>
+<div class="live-layout">
+  <div class="live-side"><div class="grid">
+    <div class="stat"><div class="k">Mode</div><div id="vMode" class="v">OVER 4</div></div>
+    <div class="stat"><div class="k">Market</div><div id="vMarket" class="v">—</div></div>
+    <div class="stat"><div class="k">Signal</div><div id="vSignal" class="v">WAIT</div></div>
+    <div class="stat"><div class="k">Stake</div><div id="vStake" class="v">$1.00</div></div>
+    <div class="stat"><div class="k">Account Balance</div><div id="vBalance" class="v">—</div><div class="k" id="balanceLabel">Connect to view live balance</div></div>
+    <div class="stat"><div class="k">Session P/L</div><div id="vPL" class="v">$0.00</div></div>
+    <div class="stat"><div class="k">Wins / Losses</div><div id="vWL" class="v">0 / 0</div></div>
+    <div class="stat"><div class="k">Loss streak</div><div id="vLS" class="v">0</div></div>
+    <div class="stat"><div class="k">Max loss streak reached</div><div id="vMaxLS" class="v">0</div></div>
+    <div class="stat"><div class="k">Contract</div><div id="vContract" class="v">—</div></div>
+    <div class="stat"><div class="k">Trading</div><div id="vTrading" class="v">WAIT</div></div>
+  </div>
+  <div style="margin-top:12px"><canvas id="chart" width="850" height="125"></canvas></div>
+  <div class="note" style="margin-top:7px">Contract monitor only: graph locks to the actual traded market from OPEN → CLOSE and stays there until the next contract opens.</div>
+  <div class="live-actions">
+    <button id="connect">CONNECT</button>
+    <button id="start">START BOT</button>
+  </div>
+  <div style="margin-top:10px"><span id="pill" class="pill">Disconnected</span></div>
+  <div id="status" class="note" style="margin-top:8px">Loading JavaScript…</div></div>
+  <aside class="money-side"><h2>Money management</h2><div class="money-grid">
+    <div><label>Initial stake ($)</label><input id="baseStake" type="number" step=".01" value="1"></div>
+    <div><label>Recovery multiplier</label><input id="mult" type="number" step=".01" value="2"></div>
+    <div><label>Maximum stake ($)</label><input id="maxStake" type="number" step=".01" value="400"></div>
+    <div><label>Session take profit ($) — stops on settlement</label><input id="sessionTP" type="number" step=".01" value="20"></div>
+    <div><label>Session stop loss ($)</label><input id="sessionSL" type="number" step=".01" value=""></div>
+    <div><label>Maximum loss streak (0 = no limit)</label><input id="maxLoss" type="number" min="0" value="0"></div>
+    <div class="full note">Continuous trading after every win and loss is enabled. With market switching ON, after every win or loss the bot skips the last traded market and waits for a qualifying tick on another market when available. The bot stops when session take profit, session stop loss, or a non-zero maximum loss streak is reached.</div>
+  </div>
+  <div class="note" style="margin-top:8px">Losses do not stop the bot after 3 losses. Use session stop loss or a non-zero maximum loss streak only if you want a limit.</div>
+  <button id="stop" class="danger">STOP</button></aside>
+</div></section>
+
+<section class="card"><h2>Scanner — live Digit Over/Under scores</h2><table><thead><tr><th>Market</th><th>Digit signal</th><th>Digit</th><th>Status</th></tr></thead><tbody id="scan"></tbody></table></section>
+<section class="card"><h2>5. Trade history</h2>
+<div class="note" style="margin-bottom:9px">Completed contracts from this browser session.</div>
+<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Time</th><th>Market</th><th>Digit signal</th><th>Digit</th><th>Stake</th><th>Result</th><th>P/L</th><th>Contract</th></tr></thead><tbody id="history"><tr><td colspan="9">No completed trades yet.</td></tr></tbody></table></div>
+<div class="row"><button id="downloadCsv" class="secondary">DOWNLOAD CSV</button><button id="clearHistory" class="danger">CLEAR HISTORY</button></div>
+</section>
+</div>
+
+<script>
+"use strict";
+const API="https://api.derivws.com", PUBLIC_WS="wss://api.derivws.com/trading/v1/options/ws/public";
+window.addEventListener("error",e=>{const s=document.getElementById("status");if(s)s.textContent="JS ERROR — "+(e.message||"Unknown error")+" @ line "+(e.lineno||"?")});
+window.addEventListener("unhandledrejection",e=>{const s=document.getElementById("status");if(s)s.textContent="PROMISE ERROR — "+(e.reason&&e.reason.message||e.reason||"Unknown error")});
+const $=id=>document.getElementById(id), money=n=>"$"+Number(n||0).toFixed(2);
+const GRANULARITY=60;
+
+const S={
+  ws:null,marketWs:null,tradeWs:null,connected:false,running:false,inTrade:false,req:10,treq:1000,currency:"USD",account:null,
+  symbols:new Map(),candles:new Map(),ticks:new Map(),candidates:[],lastTradedMarket:null,lastLossMarket:null,stake:1,pl:0,wins:0,losses:0,lossStreak:0,maxLossStreak:0,
+  active:null,pending:null,cooldownUntil:0,blocked:new Set(),marketLoss:new Map(),tradedSignals:new Map(),lockedMarket:null,lockedDirection:null,
+  graphCode:null,graphLabel:"Waiting for contract",openMark:null,closeMark:null,history:[],discovered:0,
+  lastTradeMessage:null,connectTimeout:null,connectAttempt:0,connectSession:0
+};
+
+function say(x){const s=$("status");if(s)s.textContent=x}
+function nextReq(){return ++S.req}
+function nextT(){return ++S.treq}
+function ws(){return S.tradeWs}
+function send(o){const w=S.tradeWs;if(w&&w.readyState===WebSocket.OPEN){w.send(JSON.stringify(o));return true}return false}
+function msend(o){const w=S.marketWs;if(w&&w.readyState===WebSocket.OPEN){w.send(JSON.stringify(o));return true}return false}
+
+/* ---------- connection: Deriv REST account + OTP, authenticated trading WS ---------- */
+function derivError(j,status){const e=Array.isArray(j?.errors)&&j.errors.length?j.errors[0]:null;return (e?.code||j?.error?.code||("HTTP_"+status))+": "+(e?.message||e?.detail?.message||j?.error?.message||j?.message||("HTTP "+status))}
+async function api(path,method="GET"){const pat=$("pat").value.trim(),app=$("appId").value.trim();if(!app)throw Error("APP_ID_MISSING: Enter your new Deriv API App ID.");if(!pat)throw Error("PAT_MISSING: Enter your Deriv Personal Access Token.");let r;try{r=await fetch(API+path,{method,mode:"cors",cache:"no-store",headers:{"Authorization":"Bearer "+pat,"Deriv-App-ID":app,"Accept":"application/json","Content-Type":"application/json"}})}catch(e){throw Error("NETWORK_OR_CORS: "+e.message)}let j={};try{j=await r.json()}catch{throw Error("HTTP_"+r.status+": Deriv returned a non-JSON response.")}if(!r.ok||j?.errors?.length)throw Error(derivError(j,r.status));return j}
+async function connectAll(){try{$("connect").disabled=true;S.connected=false;$("pill").textContent="Connecting…";say("Step 1/4 — opening Deriv public market WebSocket…");if(S.marketWs)try{S.marketWs.close()}catch{};if(S.tradeWs)try{S.tradeWs.close()}catch{};
+ await new Promise((res,rej)=>{S.marketWs=new WebSocket(PUBLIC_WS);let done=false,t=setTimeout(()=>{if(!done){done=true;rej(Error("PUBLIC_WS_TIMEOUT: public WebSocket did not open."))}},12000);S.marketWs.onopen=()=>{if(done)return;done=true;clearTimeout(t);S.marketWs.onmessage=onMarketSocket;const currentMarketWs=S.marketWs;S.marketWs.onclose=()=>{if(S.marketWs===currentMarketWs){S.connected=false;setRunning(false);$("pill").textContent="Disconnected"}};msend({active_symbols:"brief",req_id:nextReq()});res()};S.marketWs.onerror=()=>{if(!done){done=true;clearTimeout(t);rej(Error("PUBLIC_WS_ERROR: browser could not open Deriv public WebSocket."))}}});
+ say("Step 2/4 — validating App ID + PAT and reading Options accounts…");const a=await api("/trading/v1/options/accounts"),want=$("accountMode").value,list=Array.isArray(a?.data)?a.data:(a?.data?[a.data]:[]),matches=list.filter(x=>String(x.account_type||"").toLowerCase()===want&&String(x.status||"active").toLowerCase()==="active");if(!matches.length)throw Error("ACCOUNT_NOT_FOUND: No active "+want+" Options account returned.");S.account=matches.find(x=>String(x.currency||"").toUpperCase()==="USD")||matches[0];S.currency=S.account.currency||"USD";
+ say("Step 3/4 — requesting one-time authenticated WebSocket URL…");const o=await api("/trading/v1/options/accounts/"+encodeURIComponent(S.account.account_id)+"/otp","POST"),url=o?.data?.url||o?.data?.websocket_url||o?.data?.websocketUrl||o?.data?.ws_url;if(!url)throw Error("OTP_URL_MISSING: Deriv returned no WebSocket URL.");
+ say("Step 4/4 — opening authenticated "+want.toUpperCase()+" WebSocket…");await new Promise((res,rej)=>{S.tradeWs=new WebSocket(url);let done=false,t=setTimeout(()=>{if(!done){done=true;rej(Error("AUTH_WS_TIMEOUT: authenticated WebSocket did not open."))}},12000);S.tradeWs.onopen=()=>{if(done)return;done=true;clearTimeout(t);S.tradeWs.onmessage=onTradeSocket;res()};S.tradeWs.onerror=()=>{if(!done){done=true;clearTimeout(t);rej(Error("AUTH_WS_ERROR: authenticated WebSocket failed; reconnect for a fresh OTP."))}};S.tradeWs.onclose=()=>{setRunning(false);if(S.connected){S.connected=false;$("pill").textContent="Disconnected";say("Authenticated WebSocket closed. Press CONNECT for a fresh OTP.")}}});
+ S.connected=true;send({balance:1,subscribe:1,req_id:nextT()});$("balanceLabel").textContent=want.toUpperCase()+" · "+S.currency;$("pill").textContent="Connected "+want.toUpperCase();say("CONNECTED — "+want.toUpperCase()+". live Digit Over/Under market feed active.");
+ }catch(e){S.connected=false;$("pill").textContent="Connection failed";say("CONNECT FAILED — "+e.message)}finally{$("connect").disabled=false}}
+
+function onMarketSocket(ev){let d;try{d=JSON.parse(ev.data)}catch{return}onMarketData(d)}
+function onTradeSocket(ev){let d;try{d=JSON.parse(ev.data)}catch{return}onTradeData(d)}
+
+/* ---------- market data ---------- */
+function onMarketData(d){
+  if(d.error){say("MARKET API ERROR — "+(d.error.message||d.error.code||"Unknown error"));return}
+  if(d.msg_type==="active_symbols"){
+    S.symbols.clear();S.discovered=0;
+    for(const x of d.active_symbols||[]){
+      const code=x.underlying_symbol||x.symbol;
+      const name=x.underlying_symbol_name||x.display_name||code;
+      if(!code||!name)continue;
+      S.symbols.set(code,{code,name,pip_size:Number(x.pip_size||x.pip||0)});
+      // Subscribe to live ticks for every market returned by Deriv. The former
+      // empty POOLS filter meant no symbols were ever subscribed.
+      S.discovered++;
+      msend({ticks:code,subscribe:1,req_id:nextReq()});
+    }
+    say(S.discovered?"MARKETS LOADED — "+S.discovered+" markets found; live tick subscriptions requested.":"NO MARKETS RETURNED — check the public feed and reconnect.");
+    evaluate();
+  }
+  if(d.msg_type==="tick"&&d.tick){
+    const t=d.tick,code=t.symbol,meta=S.symbols.get(code);
+    if(!meta)return;
+    const quote=Number(t.quote),epoch=Number(t.epoch||Math.floor(Date.now()/1000));
+    if(!Number.isFinite(quote))return;
+    const digit=lastDigit(quote,meta.pip_size);
+    S.ticks.set(code,{quote,digit,epoch,meta});
+    // Keep a lightweight price trace for the existing graph without changing its design.
+    let arr=S.candles.get(code)||[];
+    arr.push({open:quote,high:quote,low:quote,close:quote,epoch,open_time:epoch});
+    if(arr.length>150)arr=arr.slice(-150);
+    S.candles.set(code,arr);
+    if(S.graphCode===code)drawGraph();
+    evaluate(code,epoch);
+  }
+}
+
+/* ---------- digit over/under strategy ---------- */
+function lastDigit(quote,pipSize){
+  const decimals=Math.max(0,Math.min(10,Number(pipSize)||0));
+  const fixed=Number(quote).toFixed(decimals);
+  const digits=fixed.replace(/\D/g,"");
+  return Number(digits.slice(-1));
+}
+function digitSignal(code,meta){
+  const tick=S.ticks.get(code);
+  if(!tick)return null;
+  const digit=tick.digit;
+  const barrier=Math.max(0,Math.min(9,Number($("digitBarrier").value)||4));
+  const trigger=$("digitTrigger").value;
+  const qualifies=trigger==="over"?digit>barrier:digit<barrier;
+  if(!qualifies)return null;
+  return {code,name:meta.name,sig:trigger==="over"?"OVER":"UNDER",digit,barrier,score:100,
+    signalKey:trigger+":"+String(tick.epoch)+":"+String(tick.quote),quote:tick.quote,epoch:tick.epoch};
+}
+function evaluate(changedCode=null,changedEpoch=null){
+  const candidates=[];
+  for(const [code,meta] of S.symbols){
+    const sig=digitSignal(code,meta);
+    if(sig)candidates.push(sig);
+  }
+  S.candidates=candidates;
+  renderScan();
+  if(candidates.length){
+    const best=candidates[0];
+    $("vMarket").textContent=best.name.replace(" Index","");
+    $("vSignal").textContent=best.sig+" "+best.digit;
+  }else{
+    $("vSignal").textContent="WAIT";
+  }
+  if(S.running&&!S.inTrade&&!S.pending&&candidates.length){
+    // Rotate across markets: after a trade, do not immediately re-enter the same
+    // market while other markets are available. Wait for a qualifying live tick
+    // from a different market; if Deriv only returned one market, allow it.
+    const fresh=changedCode?candidates.find(x=>x.code===changedCode&&x.epoch===changedEpoch&&S.tradedSignals.get(x.code)!==x.signalKey):null;
+    const hasAlternative=S.symbols.size>1;
+    const switchingOn=$("switchAfterLoss")?.value==="yes";
+    // When switching is enabled, never re-enter the most recently traded market
+    // immediately after either a win or a loss if another market is available.
+    const sameAsLast=switchingOn&&hasAlternative&&fresh?.code===S.lastTradedMarket;
+    const avoidLossMarket=switchingOn&&hasAlternative&&fresh?.code===S.lastLossMarket;
+    if(fresh&&!sameAsLast&&!avoidLossMarket){
+      if(S.lastLossMarket&&fresh.code!==S.lastLossMarket)S.lastLossMarket=null;
+      place(fresh);
+    }
+  }
+}
+function renderScan(){
+  $("scan").innerHTML=S.candidates.slice(0,10).map(x=>`<tr><td>${x.name}</td><td>${x.sig} ${x.digit}</td><td>${x.score}</td><td class="good">DIGIT TRIGGER</td></tr>`).join("")||'<tr><td colspan="4">Waiting for a selected market last digit to qualify…</td></tr>';
+}
+
+/* ---------- trading ---------- */
+function place(c){
+  if(!S.connected||ws()?.readyState!==WebSocket.OPEN)return setRunning(false),say("Trade connection unavailable. Reconnect first.");
+  const minutesRaw=$("rfDurationMin").value.trim();
+  const useMinutes=minutesRaw!=="";
+  const configuredTicks=Math.max(1,Math.floor(Number($("rfDurationTicks").value)||1));
+  const duration=useMinutes?Math.max(1,Math.min(59,Number(minutesRaw)||1)):Math.max(1,Math.floor(Number(c.durationOverride)||configuredTicks));
+  const durationUnit=useMinutes?"m":"t";
+  const req={proposal:1,amount:S.stake,basis:"stake",contract_type:(c.sig==="UNDER"?"DIGITUNDER":c.sig==="OVER"?"DIGITOVER":$("digitContract").value),barrier:String(c.barrier??Number($("digitBarrier").value)),currency:S.currency,underlying_symbol:c.code,duration,duration_unit:durationUnit,req_id:nextT()};
+  if(!S.lockedMarket){S.lockedMarket=c.code;S.lockedDirection=c.sig;}
+  S.inTrade=true;S.pending={kind:"proposal",candidate:c,req,startedAt:Date.now()};
+  if(!send(req)){S.pending=null;S.inTrade=false;setRunning(false);return say("Proposal could not be sent. Reconnect first.")}
+  say((c.continuation?"Trend continuation ":"Digit Over/Under ")+c.sig+" confirmed on "+c.name+" — requesting proposal…");
+}
+function onTradeData(d){
+  S.lastTradeMessage={type:String(d.msg_type||"unknown"),id:d.req_id||null,error:d.error&&d.error.code||null,at:Date.now()};
+  if(d.error){
+    if(d.echo_req&&d.echo_req.balance){$("balanceLabel").textContent="Balance unavailable";return}
+    if(d.echo_req&&d.echo_req.authorize){clearTimeout(S.connectTimeout);$("connect").disabled=false;$("pill").textContent="Token rejected";say("TOKEN REJECTED — "+(d.error.message||d.error.code));return}
+    say("Deriv error ["+(d.error.code||"unknown")+"]: "+(d.error.message||"No details"));S.pending=null;S.inTrade=false;setRunning(false);return;
+  }
+  if(d.msg_type==="balance"&&d.balance){const n=Number(d.balance.balance);if(Number.isFinite(n))$("vBalance").textContent=new Intl.NumberFormat("en-US",{style:"currency",currency:S.currency}).format(n);return}
+  if(d.msg_type==="proposal"&&S.pending&&S.pending.kind==="proposal"){
+    const p=d.proposal;if(!p||!p.id){S.pending=null;S.inTrade=false;return say("Deriv returned no proposal.")}
+    S.pending.kind="buy";S.pending.startedAt=Date.now();S.pending.buyReq=nextT();
+    if(!send({buy:p.id,price:Number((Number(p.ask_price||S.stake)*1.02).toFixed(2)),req_id:S.pending.buyReq})){S.pending=null;S.inTrade=false;setRunning(false)}return;
+  }
+  if(d.msg_type==="buy"&&S.pending&&S.pending.kind==="buy"){
+    const id=d.buy&&d.buy.contract_id;if(!id){S.pending=null;S.inTrade=false;return say("Purchase was not confirmed.")}
+    const c=S.pending.candidate,entry=Number.isFinite(c.quote)?c.quote:null;
+    S.tradedSignals.set(c.code,c.signalKey);S.lastTradedMarket=c.code;S.active={id,code:c.code,name:c.name,signal:c.sig,score:c.score,digit:c.digit,barrier:c.barrier,stake:S.stake,duration:S.pending.req.duration,durationUnit:S.pending.req.duration_unit,entryTime:new Date().toISOString(),entryPrice:entry};
+    S.graphCode=c.code;S.graphLabel=c.name.replace(" Index","")+" · "+c.sig+" digit "+(c.digit??"")+" · "+S.active.duration+(S.active.durationUnit==="m"?" MIN":" TICKS");S.openMark=entry;S.closeMark=null;
+    $("vTrading").textContent=c.sig+" · "+S.active.duration+(S.active.durationUnit==="m"?" MIN":" TICKS")+" · "+money(S.stake);$("vContract").textContent=String(id);S.pending=null;drawGraph();
+    send({proposal_open_contract:1,contract_id:id,subscribe:1,req_id:nextT()});say("Contract OPEN — "+c.name);return;
+  }
+  if(d.msg_type==="proposal_open_contract"&&S.active&&String(d.proposal_open_contract&&d.proposal_open_contract.contract_id)===String(S.active.id)){
+    const c=d.proposal_open_contract;if(c.is_sold||["won","lost","sold"].includes(String(c.status||"").toLowerCase()))settle(Number(c.profit||0),c);
+  }
+}
+function settle(profit,contract){
+  const a=S.active;if(!a)return;const win=profit>0;S.pl+=profit;S.closeMark=Number(contract.exit_spot??contract.current_spot??a.entryPrice);
+  if(win){
+    S.wins++;S.lossStreak=0;S.stake=Number($("baseStake").value)||1;
+    S.blocked.clear();S.marketLoss.clear();S.cooldownUntil=0;
+    S.lockedMarket=a.code;S.lockedDirection=a.signal;
+    // In continuous mode, allow the next qualifying tick on this market to trigger
+    // another contract even if the quote/digit repeats within the same second.
+    S.tradedSignals.delete(a.code);
+  }
+  else{
+    S.losses++;S.lossStreak++;S.maxLossStreak=Math.max(S.maxLossStreak,S.lossStreak);
+    const count=(S.marketLoss.get(a.code)||0)+1;S.marketLoss.set(a.code,count);
+    // No post-loss cooldown; assess live candle reversal immediately, then submit the next recovery proposal without waiting for a fresh crossover.
+    S.lockedMarket=a.code;S.lockedDirection=a.signal==="RISE"?"FALL":"RISE";S.blocked.delete(a.code);S.cooldownUntil=0;
+    S.lastLossMarket=a.code;
+    S.stake=Math.min(Number($("maxStake").value)||400,a.stake*(Number($("mult").value)||2));
+  }
+  S.history.push({time:new Date().toLocaleString(),market:a.name,signal:a.signal,score:a.score,stake:a.stake,result:win?"WIN":"LOSS",profit,contract:a.id});
+  S.active=null;S.inTrade=false;$("vContract").textContent="—";renderHistory();refresh();drawGraph();
+  const slText=$("sessionSL").value.trim();
+  const maxLossLimit=Math.max(0,Number($("maxLoss").value)||0);
+  const tpText=$("sessionTP").value.trim();
+  const tpLimit=tpText===""?null:Number(tpText);
+  const stopForTP=tpLimit!==null&&Number.isFinite(tpLimit)&&tpLimit>0&&S.pl>=tpLimit;
+  const stopForSL=slText!==""&&Number.isFinite(Number(slText))&&Number(slText)>0&&S.pl<=-Math.abs(Number(slText));
+  const stopForLossStreak=maxLossLimit>0&&S.lossStreak>=maxLossLimit;
+  const stopForLimit=stopForTP||stopForSL||stopForLossStreak;
+  if(stopForLimit){
+    setRunning(false);
+    const reason=stopForTP?"SESSION TAKE PROFIT REACHED — ":stopForSL?"SESSION STOP LOSS REACHED — ":"MAXIMUM LOSS STREAK REACHED — ";
+    say(reason+"session P/L "+money(S.pl)+". Bot stopped.");
+  }else if(win){
+    // Do not stop the running flag on a win in continuous mode. The next incoming
+    // qualifying tick will start the next contract, until session TP/SL is reached.
+    say("WIN "+money(profit)+" — continuous mode active; stake reset. Waiting for the next qualifying tick. Session P/L: "+money(S.pl)+" / TP "+(tpLimit===null?"OFF":money(tpLimit))+".");
+  }else{
+    say("LOSS "+money(profit)+" — recovery stake "+money(S.stake));
+  }
+  // Keep trading after wins and losses until a configured session limit is hit.
+  // After a loss, retain the recovery stake but wait for a qualifying tick from
+  // a different market when alternatives exist, rather than forcing the same market.
+  if(!stopForLimit&&S.running&&S.connected){
+    say((win?"WIN "+money(profit)+" — ":"LOSS "+money(profit)+" — recovery stake "+money(S.stake)+". ")+
+      "Continuous mode active; switching away from the last traded market and waiting for the next qualifying live tick. Session P/L: "+money(S.pl)+" / TP "+(tpLimit===null?"OFF":money(tpLimit))+".");
+  }
+}
+
+/* ---------- display ---------- */
+function setRunning(value){S.running=Boolean(value);$("start").textContent=S.running?"BOT RUNNING":"START BOT";$("start").classList.toggle("state-on",S.running);$("stop").classList.toggle("state-off",!S.running);if(!S.active)$("vTrading").textContent=S.running?"SCANNING":"STOPPED"}
+function refresh(){$("vStake").textContent=money(S.stake);$("vPL").textContent=money(S.pl);$("vWL").textContent=S.wins+" / "+S.losses;$("vLS").textContent=S.lossStreak;$("vMaxLS").textContent=S.maxLossStreak}
+function renderHistory(){
+  $("history").innerHTML=S.history.length?[...S.history].reverse().map((h,i)=>`<tr><td>${S.history.length-i}</td><td>${h.time}</td><td>${h.market}</td><td>${h.signal}</td><td>${h.digit??""}</td><td>${money(h.stake)}</td><td class="${h.profit>0?"good":"bad"}">${h.result}</td><td>${money(h.profit)}</td><td>${h.contract}</td></tr>`).join(""):'<tr><td colspan="9">No completed trades yet.</td></tr>';
+}
+function csvCell(v){return '"'+String(v??"").replaceAll('"','""')+'"'}
+function downloadHistory(){const cols=["No","Time","Market","Digit signal","Digit","Stake","Result","Profit","Contract ID"],rows=S.history.map((h,i)=>[i+1,h.time,h.market,h.signal,h.score,h.stake,h.result,h.profit,h.contract]),csv=[cols,...rows].map(r=>r.map(csvCell).join(",")).join("\r\n"),blob=new Blob([csv],{type:"text/csv"}),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download="matrix-over-under-history.csv";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)}
+function drawGraph(){
+  const cv=$("chart"),ctx=cv.getContext("2d"),arr=(S.candles.get(S.graphCode)||[]).slice(-45);ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle="#eef6ff";ctx.font="bold 13px system-ui";ctx.fillText(S.graphLabel,12,18);if(arr.length<2)return;
+  let lo=Math.min(...arr.map(c=>c.low)),hi=Math.max(...arr.map(c=>c.high)),span=hi-lo||1;const x=i=>10+i/(arr.length-1)*(cv.width-20),y=v=>cv.height-9-(v-lo)/span*(cv.height-38);
+  ctx.strokeStyle="#409bff";ctx.lineWidth=2;ctx.beginPath();arr.forEach((c,i)=>i?ctx.lineTo(x(i),y(c.close)):ctx.moveTo(x(i),y(c.close)));ctx.stroke();
+  const mark=(v,label,color)=>{if(!Number.isFinite(v))return;ctx.strokeStyle=color;ctx.beginPath();ctx.moveTo(8,y(v));ctx.lineTo(cv.width-8,y(v));ctx.stroke();ctx.fillStyle=color;ctx.fillText(label,12,Math.max(32,y(v)-4))};mark(S.openMark,"OPEN","#2ee6a6");mark(S.closeMark,"CLOSE","#ff647c");
+}
+
+$("connect").onclick=connectAll;
+$("start").onclick=()=>{if(!S.connected)return say("Connect first.");if(S.active||S.inTrade||S.pending)return say("Wait for the current contract or request.");S.stake=Number($("baseStake").value)||1;S.cooldownUntil=0;S.blocked.clear();S.marketLoss.clear();S.lockedMarket=null;S.lockedDirection=null;S.lastLossMarket=null;setRunning(true);refresh();evaluate();say("BOT ON — instant digit scanner. Default trigger is last digit OVER 4; duration is 1 tick. Continuous trading after wins is enabled; session limits remain active.")};
+$("stop").onclick=()=>{setRunning(false);say("Bot OFF. Any open contract remains monitored.")};
+$("downloadCsv").onclick=downloadHistory;$("clearHistory").onclick=()=>{S.history=[];renderHistory();say("Trade history cleared.")};
+setInterval(()=>{if(S.marketWs?.readyState===WebSocket.OPEN)msend({ping:1,req_id:nextReq()});if(ws()?.readyState===WebSocket.OPEN)send({ping:1,req_id:nextT()});if(S.active)send({proposal_open_contract:1,contract_id:S.active.id,req_id:nextT()});if(S.pending&&Date.now()-S.pending.startedAt>20000){setRunning(false);if(S.pending.kind==="proposal"){S.pending=null;S.inTrade=false;say("PROPOSAL TIMEOUT — stopped; reconnect before retrying.")}else{say("BUY RESPONSE DELAYED — stopped. Check Deriv open contracts before reconnecting.");S.pending.startedAt=Date.now()}}},12000);
+document.querySelectorAll("button").forEach(b=>{b.addEventListener("pointerdown",()=>b.classList.add("tap-active"));["pointerup","pointercancel","pointerleave"].forEach(e=>b.addEventListener(e,()=>b.classList.remove("tap-active")))});
+S.stake=Number($("baseStake").value)||1;refresh();renderHistory();renderScan();drawGraph();setRunning(false);say("Matrix ready. Connect to Deriv.");
+</script></body></html>
