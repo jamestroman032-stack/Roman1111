@@ -1,0 +1,425 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deriv Rise/Fall · 15 Indicator Analyzer</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#091321;color:#edf3ff;font:15px system-ui}
+main{max-width:900px;margin:auto;padding:18px}
+.card{background:#132137;border:1px solid #2b405e;border-radius:15px;padding:16px;margin:12px 0}
+.muted,small{color:#a0b1c8}.small{font-size:12px}.price{font-size:30px;font-weight:800}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:145px}
+input,select,button{width:100%;padding:12px;border-radius:9px;background:#1c304d;color:white;border:1px solid #405878;font:inherit}
+button{background:#2468c9;font-weight:bold;cursor:pointer}button:disabled{opacity:.55;cursor:wait}
+.secondary{background:#344761}.signal{font-size:30px;font-weight:900}
+.rise{color:#21c997}.fall{color:#ff6577}.skip{color:#f4bd50}
+.ind{padding:10px;background:#0d192b;border-radius:9px;margin:7px 0}
+.ind b{display:block}.buy{color:#21c997}.sell{color:#ff6577}.neutral{color:#f4bd50}
+.status-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f4bd50;margin-right:6px}
+.status-dot.on{background:#21c997}.status-dot.off{background:#ff6577}
+.note{line-height:1.5}.pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#203653;margin:3px}
+</style></head>
+<body><main>
+<h1>Deriv · Rise/Fall Indicator Analyzer</h1>
+<p class="muted">15 directional indicator readings · Live Deriv market feed · Tap to predict · Signal only (does not place trades)</p>
+
+<div class="card">
+  <b>Deriv connection</b>
+  <div class="row" style="margin-top:10px">
+    <label>Deriv App ID
+      <input id="appId" inputmode="numeric" autocomplete="off" placeholder="Your Deriv App ID">
+    </label>
+    <label>Deriv API Token / PAT
+      <input id="apiToken" type="password" autocomplete="off" placeholder="Paste your Deriv PAT">
+    </label>
+  </div>
+  <p><button id="connect">CONNECT TO DERIV</button></p>
+  <p class="small note">Enter the same App ID and PAT used by your working Matrix bot. Never enter your Deriv password.</p>
+  <div id="connection" class="small"><span class="status-dot"></span>Not connected</div>
+</div>
+
+<div class="card">
+  <small>LIVE MARKET PRICE</small>
+  <div id="price" class="price">—</div>
+  <div id="feed" class="small">Connect to Deriv to load available markets.</div>
+  <div id="count" class="small">No candles loaded</div>
+</div>
+
+<div class="card">
+  <b>Prediction settings</b>
+  <div class="row" style="margin-top:10px">
+    <label>Deriv market<select id="asset" disabled><option value="">Connect to load markets</option></select></label>
+    <label>Timeframe<select id="tf">
+      <option value="15">15 seconds</option><option value="30">30 seconds</option>
+      <option value="60" selected>1 minute</option><option value="120">2 minutes</option>
+      <option value="180">3 minutes</option>
+    </select></label>
+  </div>
+  <p><button id="predict" disabled>PREDICT NOW</button></p>
+  <div class="ind" style="margin-top:10px">
+    <label style="display:flex;align-items:center;gap:10px">
+      <input id="autoMode" type="checkbox" checked style="width:20px;height:20px;flex:0 0 auto">
+      <span><b>Automatic prediction every minute</b><small class="muted" style="display:block">Runs on each new minute boundary and refreshes the signal.</small></span>
+    </label>
+    <p class="small" style="margin-bottom:0">Next automatic update: <b id="autoCountdown">Waiting for Deriv connection</b></p>
+    <p class="small" id="lastAuto" style="margin:5px 0 0">No automatic prediction yet</p>
+  </div>
+  <small class="note">Every prediction fetches fresh Deriv history and rebuilds completed candles for the selected timeframe. Automatic updates are aligned to the start of each minute. The selected timeframe is the suggested contract duration.</small>
+</div>
+
+<div class="card">
+  <small>OVERALL SIGNAL</small>
+  <div id="signal" class="signal skip">NEUTRAL — SKIP</div>
+  <div id="reason" class="muted">Connect to Deriv, select a market and tap Predict.</div>
+  <p>Indicator alignment: <b id="score">—</b></p>
+  <p>RISE: <b id="rise">—</b>　 FALL: <b id="fall">—</b>　 NEUTRAL: <b id="neutral">—</b></p>
+  <p>Suggested duration: <b id="expiry">—</b></p>
+</div>
+
+<div class="card"><b>Indicator breakdown · 15 votes + ATR filter</b>
+  <div id="indicators">
+    <div class="ind">Bollinger Bands<b>Waiting</b></div><div class="ind">EMA 9 / 21<b>Waiting</b></div>
+    <div class="ind">SMA 20 / 50<b>Waiting</b></div><div class="ind">RSI 14<b>Waiting</b></div>
+    <div class="ind">MACD<b>Waiting</b></div><div class="ind">Stochastic<b>Waiting</b></div>
+  </div>
+</div>
+<div class="card"><b>Data validation</b>
+  <p id="validation" class="small">No prediction yet. Missing, stale or incomplete data returns ERROR — DO NOT TRADE.</p>
+  <small class="note">A 15-indicator agreement is not a calibrated win probability or a guarantee. Synthetic indices can move rapidly. Test on a Deriv demo account before relying on any signal.</small>
+</div>
+</main>
+<script>
+const $=x=>document.getElementById(x);
+const API='https://api.derivws.com';
+const PUBLIC_WS='wss://api.derivws.com/trading/v1/options/ws/public';
+let ws=null, authWs=null, requestSeq=1, pending=new Map(), tickSub=null, liveSymbol='', lastQuote=null, activeMarkets=[];
+function setConn(text,kind='wait'){
+  const dot=kind==='on'?'on':kind==='off'?'off':'';
+  $('connection').innerHTML='<span class="status-dot '+dot+'"></span>'+text;
+}
+function send(obj){
+  if(!ws||ws.readyState!==WebSocket.OPEN) throw Error('Not connected to Deriv. Tap CONNECT TO DERIV.');
+  ws.send(JSON.stringify(obj));
+}
+function request(obj,timeoutMs=18000){
+  return new Promise((resolve,reject)=>{
+    const req_id=requestSeq++;
+    const timer=setTimeout(()=>{pending.delete(req_id);reject(Error('Deriv request timed out. Check connection and try again.'))},timeoutMs);
+    pending.set(req_id,{resolve,reject,timer});
+    send({...obj,req_id});
+  });
+}
+function closeSocket(){
+  if(ws){try{ws.close()}catch(e){}}
+  ws=null; pending.forEach(p=>{clearTimeout(p.timer);p.reject(Error('Deriv connection closed'))});pending.clear();
+}
+async function derivApi(path,method='GET'){
+  const app=$('appId').value.trim(),pat=$('apiToken').value.trim();
+  if(!app)throw Error('Enter your Deriv App ID.');
+  if(!pat)throw Error('Enter your Deriv API Token/PAT.');
+  let response;
+  try{response=await fetch(API+path,{method,mode:'cors',cache:'no-store',
+    headers:{'Authorization':'Bearer '+pat,'Deriv-App-ID':app,'Accept':'application/json','Content-Type':'application/json'}})}
+  catch(e){throw Error('Deriv REST connection failed: '+e.message)}
+  let data={};try{data=await response.json()}catch(e){throw Error('Deriv returned an invalid response (HTTP '+response.status+').')}
+  if(!response.ok||data.errors?.length){const er=data.errors?.[0];throw Error((er?.code||'HTTP_'+response.status)+': '+(er?.message||data.message||'Deriv API rejected the request'))}
+  return data;
+}
+function openSocket(url,label){
+  return new Promise((resolve,reject)=>{
+    const socket=new WebSocket(url);let finished=false;
+    const timer=setTimeout(()=>{if(!finished){finished=true;try{socket.close()}catch(e){}reject(Error(label+' connection timed out.'))}},15000);
+    socket.onopen=()=>{if(finished)return;finished=true;clearTimeout(timer);resolve(socket)};
+    socket.onerror=()=>{if(!finished){finished=true;clearTimeout(timer);reject(Error(label+' WebSocket could not open.'))}};
+  });
+}
+async function connect(){
+  $('connect').disabled=true;$('predict').disabled=true;setConn('Connecting with your Matrix App ID + PAT method…');
+  closeSocket();if(authWs){try{authWs.close()}catch(e){}authWs=null}
+  try{
+    const app=$('appId').value.trim(),pat=$('apiToken').value.trim();
+    if(!app)throw Error('Enter your Deriv App ID.');
+    if(!pat)throw Error('Enter your Deriv API Token/PAT.');
+    setConn('Step 1/4 · opening Deriv public market feed…');
+    ws=await openSocket(PUBLIC_WS,'Deriv public market');
+    ws.onmessage=ev=>{
+      let m;try{m=JSON.parse(ev.data)}catch(e){return}
+      if(m.req_id&&pending.has(m.req_id)){
+        const p=pending.get(m.req_id);pending.delete(m.req_id);clearTimeout(p.timer);
+        if(m.error)p.reject(Error(m.error.message||m.error.code||'Deriv market API error'));else p.resolve(m);
+        return;
+      }
+      if(m.msg_type==='tick'&&m.tick){
+        lastQuote=m.tick;
+        if(m.tick.symbol===liveSymbol){$('price').textContent=Number(m.tick.quote).toFixed(5);$('feed').textContent='Deriv live tick · '+m.tick.symbol}
+      }
+      if(m.error)setConn(m.error.message||'Deriv market feed error','off');
+    };
+    ws.onclose=()=>{if($('predict').disabled===false){setConn('Deriv market feed disconnected. Reconnect to continue.','off');$('predict').disabled=true}};
+    setConn('Step 2/4 · validating App ID + PAT…');
+    const accounts=await derivApi('/trading/v1/options/accounts');
+    const list=Array.isArray(accounts.data)?accounts.data:(accounts.data?[accounts.data]:[]);
+    const active=list.filter(x=>String(x.status||'active').toLowerCase()==='active');
+    if(!active.length)throw Error('No active Deriv Options account was returned for this PAT.');
+    const account=active.find(x=>String(x.currency||'').toUpperCase()==='USD')||active[0];
+    setConn('Step 3/4 · requesting authenticated WebSocket OTP…');
+    const otp=await derivApi('/trading/v1/options/accounts/'+encodeURIComponent(account.account_id)+'/otp','POST');
+    const authUrl=otp?.data?.url||otp?.data?.websocket_url||otp?.data?.websocketUrl||otp?.data?.ws_url;
+    if(!authUrl)throw Error('Deriv did not return an authenticated WebSocket URL.');
+    setConn('Step 4/4 · opening authenticated Deriv session…');
+    authWs=await openSocket(authUrl,'Authenticated Deriv');
+    authWs.onmessage=ev=>{let m;try{m=JSON.parse(ev.data)}catch(e){return}if(m.error)setConn('Authenticated session: '+(m.error.message||m.error.code),'off')};
+    const r=await request({active_symbols:'brief'});
+    // New Deriv API uses underlying_symbol / underlying_symbol_name.
+    // Legacy responses use symbol / display_name. Accept both schemas.
+    activeMarkets=(Array.isArray(r.active_symbols)?r.active_symbols:[])
+      .filter(x=>x && x.is_trading_suspended!==1 && (x.underlying_symbol||x.symbol))
+      .map(x=>{
+        const code=String(x.underlying_symbol||x.symbol||'').trim();
+        const name=String(x.underlying_symbol_name||x.display_name||code).trim();
+        return {...x, symbol:code, display_name:name};
+      })
+      .filter(x=>x.symbol);
+    if(!activeMarkets.length)throw Error('Deriv connected, but no valid active market symbols were returned.');
+    const preferredMarket = x => /volatility|step|bull|bear/i.test((x.display_name||'')+' '+(x.symbol||''));
+    activeMarkets.sort((x,y)=>(Number(preferredMarket(y))-Number(preferredMarket(x))) ||
+      String(x.display_name||x.symbol).localeCompare(String(y.display_name||y.symbol)));
+    $('asset').innerHTML=activeMarkets.map(x=>'<option value="'+escapeHtml(x.symbol)+'">'+escapeHtml(x.display_name||x.symbol)+' ('+escapeHtml(x.symbol)+')</option>').join('');
+    $('asset').disabled=false;$('predict').disabled=false;
+    setConn('Connected · App ID + PAT verified · '+activeMarkets.length+' Deriv markets loaded','on');
+    $('feed').textContent='Deriv authenticated connection · live market feed';subscribeSelected();startAutoMode();
+  }catch(e){
+    setConn(e.message,'off');$('feed').textContent=e.message;closeSocket();
+    if(authWs){try{authWs.close()}catch(e){}authWs=null}
+  }finally{$('connect').disabled=false}
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function subscribeSelected(){
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const sym=$('asset').value;if(!sym)return;
+  try{
+    if(tickSub)send({forget:tickSub});
+    liveSymbol=sym;lastQuote=null;
+    const r=await request({ticks:sym,subscribe:1});
+    tickSub=r.subscription&&r.subscription.id||null;
+    if(r.tick){lastQuote=r.tick;$('price').textContent=Number(r.tick.quote).toFixed(5)}
+    $('feed').textContent='Deriv live tick · '+sym;
+  }catch(e){$('feed').textContent=e.message}
+}
+$('asset').addEventListener('change',subscribeSelected);
+$('connect').addEventListener('click',connect);
+
+function toBarsFromTicks(history,seconds){
+  const times=history.times||[],prices=history.prices||[],groups=new Map();
+  for(let i=0;i<Math.min(times.length,prices.length);i++){
+    const t=Number(times[i]),p=Number(prices[i]);if(!Number.isFinite(t)||!Number.isFinite(p))continue;
+    const bucket=Math.floor(t/seconds)*seconds;
+    let b=groups.get(bucket);
+    if(!b){b={epoch:bucket,open:p,high:p,low:p,close:p,n:0};groups.set(bucket,b)}
+    b.high=Math.max(b.high,p);b.low=Math.min(b.low,p);b.close=p;b.n++;
+  }
+  const now=Math.floor(Date.now()/1000);
+  return [...groups.values()].filter(b=>b.epoch+seconds<=now).sort((a,b)=>a.epoch-b.epoch);
+}
+function toBarsFromCandles(candles,seconds){
+  const groups=new Map();
+  for(const c of candles||[]){
+    const t=Number(c.epoch),o=Number(c.open),h=Number(c.high),l=Number(c.low),cl=Number(c.close);
+    if(![t,o,h,l,cl].every(Number.isFinite))continue;
+    const bucket=Math.floor(t/seconds)*seconds;
+    let b=groups.get(bucket);
+    if(!b){b={epoch:bucket,open:o,high:h,low:l,close:cl,n:0};groups.set(bucket,b)}
+    b.high=Math.max(b.high,h);b.low=Math.min(b.low,l);b.close=cl;b.n++;
+  }
+  const now=Math.floor(Date.now()/1000),sourceSeconds=60;
+  return [...groups.values()].filter(b=>b.epoch+seconds<=now && b.n===seconds/sourceSeconds).sort((a,b)=>a.epoch-b.epoch);
+}
+async function getMarketHistory(){
+  const symbol=$('asset').value,seconds=Number($('tf').value);
+  if(!symbol)throw Error('Select a Deriv market first.');
+  let bars;
+  if(seconds<60){
+    const r=await request({ticks_history:symbol,adjust_start_time:1,count:5000,end:'latest',start:1,style:'ticks'},25000);
+    bars=toBarsFromTicks(r.history||{},seconds);
+  }else{
+    const r=await request({ticks_history:symbol,adjust_start_time:1,count:300,end:'latest',granularity:60,start:1,style:'candles'},25000);
+    bars=toBarsFromCandles(r.candles||[],seconds);
+  }
+  if(bars.length<60)throw Error('Only '+bars.length+' completed candles were returned; at least 60 are required. Try a faster market or a longer timeframe.');
+  const age=Date.now()/1000-(bars[bars.length-1].epoch+seconds);
+  if(age>Math.max(seconds*3,180))throw Error('Latest completed candle is stale. Market may be closed or feed delayed.');
+  return bars;
+}
+const avg=a=>a.reduce((s,x)=>s+x,0)/a.length;
+function ema(a,n){let z=Array(n-1).fill(null);if(a.length<n)return z;let v=avg(a.slice(0,n));z.push(v);for(let i=n;i<a.length;i++){v=a[i]*2/(n+1)+v*(1-2/(n+1));z.push(v)}return z}
+function sma(a,n){return a.map((_,i)=>i<n-1?null:avg(a.slice(i-n+1,i+1)))}
+function rsi(a){let o=Array(a.length).fill(null);for(let i=14;i<a.length;i++){let g=0,l=0;for(let j=i-13;j<=i;j++){let d=a[j]-a[j-1];if(d>0)g+=d;else l-=d}o[i]=l===0?100:100-100/(1+g/l)}return o}
+function sd(a){let m=avg(a);return Math.sqrt(avg(a.map(x=>(x-m)**2)))}
+function macd(a){let x=ema(a,12),y=ema(a,26),line=a.map((_,i)=>x[i]==null||y[i]==null?null:x[i]-y[i]),v=line.filter(x=>x!=null),s=ema(v,9),sig=Array(a.length).fill(null),j=0;line.forEach((x,i)=>{if(x!=null)sig[i]=s[j++]});return{line,sig,h:line.map((x,i)=>x==null||sig[i]==null?null:x-sig[i])}}
+function stoch(cs){let raw=cs.map((c,i)=>{if(i<13)return null;let w=cs.slice(i-13,i+1),hi=Math.max(...w.map(x=>x.high)),lo=Math.min(...w.map(x=>x.low));return hi===lo?50:(c.close-lo)/(hi-lo)*100}),k=raw.map((x,i)=>i<15||raw.slice(i-2,i+1).some(y=>y==null)?null:avg(raw.slice(i-2,i+1))),d=k.map((x,i)=>i<2||k.slice(i-2,i+1).some(y=>y==null)?null:avg(k.slice(i-2,i+1)));return{k,d}}
+function aggregate(bars){let g={};for(let b of bars.filter(x=>!x.isOpen)){let t=Date.parse(b.openTime)/1000,k=Math.floor(t/180)*180,x=g[k]||(g[k]={epoch:k,open:+b.open,high:+b.high,low:+b.low,close:+b.close,n:0});x.high=Math.max(x.high,+b.high);x.low=Math.min(x.low,+b.low);x.close=+b.close;x.n++}return Object.values(g).filter(x=>x.n===3).sort((a,b)=>a.epoch-b.epoch)}
+function normalize(bars){return bars.filter(x=>!x.isOpen).map(x=>({epoch:Date.parse(x.openTime)/1000,open:+x.open,high:+x.high,low:+x.low,close:+x.close})).filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.epoch-b.epoch)}
+function wilder(values,period){
+ let out=Array(values.length).fill(null);if(values.length<=period)return out;
+ let v=avg(values.slice(1,period+1));out[period]=v;
+ for(let i=period+1;i<values.length;i++)out[i]=(out[i-1]*(period-1)+values[i])/period;
+ return out;
+}
+function rollingMean(a,n){return a.map((_,i)=>i<n-1?null:avg(a.slice(i-n+1,i+1)))}
+function typical(c){return (c.high+c.low+c.close)/3}
+function extraIndicators(cs){
+ const n=cs.length,cl=cs.map(x=>x.close),hi=cs.map(x=>x.high),lo=cs.map(x=>x.low),i=n-1,p=i-1,out=[];
+ const add=(name,v,why)=>out.push([name,v,why]);
+ // Ichimoku Cloud: Tenkan 9, Kijun 26, Senkou B 52; cloud compared with current price.
+ const midRange=(end,len)=>{let h=Math.max(...hi.slice(end-len+1,end+1)),l=Math.min(...lo.slice(end-len+1,end+1));return (h+l)/2};
+ if(n>=52){let ten=midRange(i,9), kij=midRange(i,26), spanA=(ten+kij)/2, spanB=midRange(i,52),top=Math.max(spanA,spanB),bot=Math.min(spanA,spanB);
+  add('Ichimoku Cloud',cl[i]>top&&ten>kij?'BUY':cl[i]<bot&&ten<kij?'SELL':'NEUTRAL','Tenkan/Kijun and price vs cloud');
+ }else add('Ichimoku Cloud','NEUTRAL','Insufficient lookback');
+ // ADX 14 with directional movement.
+ let plus=[],minus=[],trs=[];
+ for(let j=0;j<n;j++){if(j===0){plus.push(0);minus.push(0);trs.push(hi[j]-lo[j]);continue}
+  let up=hi[j]-hi[j-1],dn=lo[j-1]-lo[j];
+  plus.push(up>dn&&up>0?up:0);minus.push(dn>up&&dn>0?dn:0);
+  trs.push(Math.max(hi[j]-lo[j],Math.abs(hi[j]-cl[j-1]),Math.abs(lo[j]-cl[j-1])));
+ }
+ let atrW=wilder(trs,14),pW=wilder(plus,14),mW=wilder(minus,14),dx=Array(n).fill(null);
+ for(let j=14;j<n;j++){if(atrW[j]){let pdi=100*pW[j]/atrW[j],mdi=100*mW[j]/atrW[j];dx[j]=pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0}}
+ let adx=wilder(dx.map(x=>x??0),14),pdi=atrW[i]?100*pW[i]/atrW[i]:0,mdi=atrW[i]?100*mW[i]/atrW[i]:0;
+ add('ADX 14',adx[i]>=20?(pdi>mdi?'BUY':'SELL'):'NEUTRAL',`ADX ${adx[i]?.toFixed(1)??'—'} · ${adx[i]>=20?'trend strength active':'weak trend'}`);
+ // Momentum 10.
+ let mom=cl[i]-cl[i-10];add('Momentum 10',mom>0?'BUY':mom<0?'SELL':'NEUTRAL',`10-bar momentum ${mom.toFixed(5)}`);
+ // CCI 20.
+ let tp=cs.map(typical),cci='NEUTRAL',cciVal=0;
+ if(n>=20){let t=tp.slice(i-19,i+1),ma=avg(t),dev=avg(t.map(x=>Math.abs(x-ma)));cciVal=dev?((tp[i]-ma)/(.015*dev)):0;cci=cciVal>100?'BUY':cciVal< -100?'SELL':'NEUTRAL'}
+ add('CCI 20',cci,`CCI ${cciVal.toFixed(1)}`);
+ // Awesome Oscillator (median price SMA 5 - SMA 34).
+ let med=cs.map(x=>(x.high+x.low)/2),ao5=rollingMean(med,5),ao34=rollingMean(med,34),ao=ao5[i]-ao34[i],aoPrev=ao5[p]-ao34[p];
+ add('Awesome Oscillator',ao>0&&ao>aoPrev?'BUY':ao<0&&ao<aoPrev?'SELL':'NEUTRAL',`AO ${ao.toFixed(5)} · ${ao>aoPrev?'rising':'falling'}`);
+ // Fractals: latest confirmed 5-bar pivot.
+ let upFr=null,dnFr=null;
+ for(let j=2;j<n-2;j++){if(hi[j]>hi[j-1]&&hi[j]>hi[j-2]&&hi[j]>hi[j+1]&&hi[j]>hi[j+2])upFr=hi[j];
+  if(lo[j]<lo[j-1]&&lo[j]<lo[j-2]&&lo[j]<lo[j+1]&&lo[j]<lo[j+2])dnFr=lo[j]}
+ add('Fractals',upFr!==null&&cl[i]>upFr?'BUY':dnFr!==null&&cl[i]<dnFr?'SELL':'NEUTRAL',`Last swing high ${upFr?.toFixed(5)??'—'} / low ${dnFr?.toFixed(5)??'—'}`);
+ // Parabolic SAR (classic iterative approximation, acceleration .02, max .20).
+ let bull=cl[1]>=cl[0],af=.02,ep=bull?hi[0]:lo[0],sar=bull?lo[0]:hi[0];
+ for(let j=1;j<n;j++){let next=sar+af*(ep-sar);
+  if(bull){next=Math.min(next,lo[j-1],j>1?lo[j-2]:lo[j-1]);if(lo[j]<next){bull=false;next=ep;ep=lo[j];af=.02}else if(hi[j]>ep){ep=hi[j];af=Math.min(.2,af+.02)}}
+  else{next=Math.max(next,hi[j-1],j>1?hi[j-2]:hi[j-1]);if(hi[j]>next){bull=true;next=ep;ep=hi[j];af=.02}else if(lo[j]<ep){ep=lo[j];af=Math.min(.2,af+.02)}}
+  sar=next;
+ }
+ add('Parabolic SAR',cl[i]>sar?'BUY':'SELL',`SAR ${sar.toFixed(5)} · price ${cl[i]>sar?'above':'below'} SAR`);
+ // Moving Average confirmation (SMA 20 / 50).
+ let ma20=rollingMean(cl,20),ma50=rollingMean(cl,50);
+ // Moving-average coverage is already represented by the primary EMA 9/21 and SMA 20/50 votes.
+ // Fractal Chaos Bands approximated from the most recent confirmed fractal levels.
+ add('Fractal Chaos Bands',upFr!==null&&cl[i]>upFr?'BUY':dnFr!==null&&cl[i]<dnFr?'SELL':'NEUTRAL','Price vs latest confirmed fractal range');
+ // Alligator: smoothed moving averages (SMMA) of median price.
+ function smma(arr,len){let z=Array(arr.length).fill(null);if(arr.length<len)return z;z[len-1]=avg(arr.slice(0,len));for(let j=len;j<arr.length;j++)z[j]=(z[j-1]*(len-1)+arr[j])/len;return z}
+ let jaw=smma(med,13),teeth=smma(med,8),lips=smma(med,5);
+ add('Alligator',lips[i]>teeth[i]&&teeth[i]>jaw[i]?'BUY':lips[i]<teeth[i]&&teeth[i]<jaw[i]?'SELL':'NEUTRAL','Lips / teeth / jaw alignment');
+ // ATR 14, displayed as volatility filter, not directional vote.
+ let atrVal=atrW[i],atrPct=atrVal/cl[i]*100;
+ add('ATR 14','INFO',`ATR ${atrVal?.toFixed(5)??'—'} · ${atrPct.toFixed(3)}% of price`);
+ return out;
+}
+function analyze(cs){
+ let a=cs.map(x=>x.close),i=a.length-1,p=i-1,c=cs[i],prev=cs[p],v=[];
+ let z=a.slice(i-19,i+1),m=avg(z),s=sd(z),u=m+2*s,l=m-2*s,t='NEUTRAL',w='No clear band rejection or breakout';
+ if(c.low<=l&&c.close>l&&c.close>c.open){t='BUY';w='Rejected lower band upward'}else if(c.high>=u&&c.close<u&&c.close<c.open){t='SELL';w='Rejected upper band downward'}else if(c.close>u&&c.close>c.open&&prev.close<=u){t='BUY';w='Bullish close above upper band'}else if(c.close<l&&c.close<c.open&&prev.close>=l){t='SELL';w='Bearish close below lower band'}v.push(['Bollinger Bands',t,w]);
+ let e9=ema(a,9),e21=ema(a,21);t='NEUTRAL';w='EMA trend not aligned';if(e9[i]>e21[i]&&e9[i]>e9[p]&&e21[i]>=e21[p]&&c.close>e9[i]){t='BUY';w='Price above rising EMA pair'}else if(e9[i]<e21[i]&&e9[i]<e9[p]&&e21[i]<=e21[p]&&c.close<e9[i]){t='SELL';w='Price below falling EMA pair'}v.push(['EMA 9 / 21',t,w]);
+ let s20=sma(a,20),s50=sma(a,50);t='NEUTRAL';w='Price not aligned with SMA pair';if(c.close>s20[i]&&s20[i]>s50[i]){t='BUY';w='Price above bullish SMA stack'}else if(c.close<s20[i]&&s20[i]<s50[i]){t='SELL';w='Price below bearish SMA stack'}v.push(['SMA 20 / 50',t,w]);
+ let rr=rsi(a),rv=rr[i];t='NEUTRAL';w='RSI '+rv.toFixed(1)+' neutral';if(rv<30&&rv>rr[p]){t='BUY';w='Oversold RSI turning up'}else if(rv>70&&rv<rr[p]){t='SELL';w='Overbought RSI turning down'}else if(rv>=55&&rv>rr[p]){t='BUY';w='RSI bullish momentum'}else if(rv<=45&&rv<rr[p]){t='SELL';w='RSI bearish momentum'}v.push(['RSI 14',t,w]);
+ let md=macd(a),h=md.h[i],ph=md.h[p];t='NEUTRAL';w='MACD histogram not expanding';if(md.line[i]>md.sig[i]&&h>0&&h>ph){t='BUY';w='Bullish MACD histogram expanding'}else if(md.line[i]<md.sig[i]&&h<0&&h<ph){t='SELL';w='Bearish MACD histogram expanding'}v.push(['MACD 12 / 26 / 9',t,w]);
+ let st=stoch(cs),k=st.k[i],d=st.d[i];t='NEUTRAL';w='%K '+k.toFixed(1)+' / %D '+d.toFixed(1)+' no extreme cross';if(st.k[p]<=st.d[p]&&k>d&&k<20&&d<25){t='BUY';w='%K crossed above %D below 20'}else if(st.k[p]>=st.d[p]&&k<d&&k>80&&d>75){t='SELL';w='%K crossed below %D above 80'}v.push(['Stochastic 14 / 3 / 3',t,w]);
+ const extra=extraIndicators(cs);
+ // All 15 directional readings participate. ATR is a volatility measurement,
+ // not a directional vote, so it is shown separately and excluded from the tally.
+ const allVotes=v.concat(extra.filter(x=>x[1]==='BUY'||x[1]==='SELL'||x[1]==='NEUTRAL'));
+ const buy=allVotes.filter(x=>x[1]==='BUY').length;
+ const sell=allVotes.filter(x=>x[1]==='SELL').length;
+ const neutral=allVotes.filter(x=>x[1]==='NEUTRAL').length;
+ const total=allVotes.length;
+ const signalThreshold=Math.ceil(total*0.70);
+ const strongThreshold=Math.ceil(total*0.85);
+ let signal='NEUTRAL — SKIP',cls='skip',reason=`No verified lean: at least ${signalThreshold}/${total} directional readings must agree.`;
+ if(buy>=signalThreshold){signal=buy>=strongThreshold?'STRONG CALL':'CALL LEAN';cls='call';reason=`${buy}/${total} directional readings agree bullish; threshold ${signalThreshold}/${total} met.`}
+ else if(sell>=signalThreshold){signal=sell>=strongThreshold?'STRONG PUT':'PUT LEAN';cls='put';reason=`${sell}/${total} directional readings agree bearish; threshold ${signalThreshold}/${total} met.`}
+ else {reason=`No verified lean: BUY ${buy}/${total}, SELL ${sell}/${total}, NEUTRAL ${neutral}/${total}. Need ${signalThreshold}/${total} aligned.`}
+ return{v,buy,sell,neutral,total,signal,cls,reason,extra};
+}
+
+let autoTimer=null,nextAutoAt=0,predictionBusy=false,lastAutoRun=0;
+async function predictNow(isAutomatic=false){
+  if(predictionBusy)return;
+  if(!ws||ws.readyState!==WebSocket.OPEN){
+    if(isAutomatic)$('autoCountdown').textContent='Waiting for Deriv connection';
+    return;
+  }
+  predictionBusy=true;
+  const b=$('predict');b.disabled=true;b.textContent=isAutomatic?'AUTO UPDATING…':'FETCHING DERIV DATA…';
+  $('signal').textContent='WAIT';$('signal').className='signal skip';
+  try{
+    const bars=await getMarketHistory();
+    const r=analyze(bars);
+    const selected=$('asset').selectedOptions[0];
+    $('price').textContent=lastQuote&&lastQuote.symbol===$('asset').value?Number(lastQuote.quote).toFixed(5):Number(bars.at(-1).close).toFixed(5);
+    $('feed').textContent=(selected?selected.textContent:$('asset').value)+' · Deriv WebSocket · '+$('tf').selectedOptions[0].textContent;
+    $('count').textContent=bars.length+' completed candles · last candle '+new Date(bars.at(-1).epoch*1000).toLocaleString();
+    $('signal').textContent=r.signal.replace('CALL','RISE').replace('PUT','FALL');
+    $('signal').className='signal '+(r.cls==='call'?'rise':r.cls==='put'?'fall':'skip');
+    $('reason').textContent=r.reason.replaceAll('bullish','RISE').replaceAll('bearish','FALL');
+    $('score').textContent=Math.max(r.buy,r.sell)+'/'+r.total+' aligned (70% required)';
+    $('rise').textContent=r.buy;$('fall').textContent=r.sell;$('neutral').textContent=r.neutral;
+    $('expiry').textContent=$('tf').selectedOptions[0].textContent+' (one candle)';
+    $('indicators').innerHTML=r.v.concat(r.extra).map(x=>'<div class="ind">'+escapeHtml(x[0])+'<b class="'+(x[1]==='BUY'?'buy':x[1]==='SELL'?'sell':'neutral')+'">'+(x[1]==='BUY'?'RISE':x[1]==='SELL'?'FALL':x[1])+'</b><small>'+escapeHtml(x[2])+'</small></div>').join('');
+    $('validation').textContent='Deriv history validated · '+bars.length+' completed candles · latest candle '+new Date(bars.at(-1).epoch*1000).toISOString();
+    if(isAutomatic){lastAutoRun=Date.now();$('lastAuto').textContent='Last automatic update: '+new Date(lastAutoRun).toLocaleTimeString()}
+  }catch(e){
+    $('signal').textContent='ERROR — DO NOT TRADE';$('signal').className='signal fall';
+    $('reason').textContent=e.message;$('validation').textContent=e.message;
+    if(isAutomatic)$('lastAuto').textContent='Automatic update failed: '+e.message;
+  }finally{
+    predictionBusy=false;b.disabled=!(ws&&ws.readyState===WebSocket.OPEN);b.textContent='PREDICT NOW';
+  }
+}
+$('predict').onclick=()=>predictNow(false);
+function stopAutoMode(){
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null}
+  nextAutoAt=0;$('autoCountdown').textContent='Paused';
+}
+function startAutoMode(){
+  stopAutoMode();
+  if(!$('autoMode').checked){$('autoCountdown').textContent='Paused';return}
+  if(!ws||ws.readyState!==WebSocket.OPEN){$('autoCountdown').textContent='Waiting for Deriv connection';return}
+  nextAutoAt=(Math.floor(Date.now()/60000)+1)*60000;
+  $('autoCountdown').textContent='Starting…';
+  predictNow(true);
+  autoTimer=setInterval(()=>{
+    if(!$('autoMode').checked){stopAutoMode();return}
+    if(!ws||ws.readyState!==WebSocket.OPEN){$('autoCountdown').textContent='Waiting for Deriv connection';return}
+    const now=Date.now();
+    if(now>=nextAutoAt){
+      nextAutoAt=(Math.floor(now/60000)+1)*60000;
+      predictNow(true);
+    }
+    const left=Math.max(0,Math.ceil((nextAutoAt-now)/1000));
+    $('autoCountdown').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+  },250);
+}
+$('autoMode').addEventListener('change',()=>{
+  if($('autoMode').checked)startAutoMode();else stopAutoMode();
+});
+$('asset').addEventListener('change',()=>{
+  if($('autoMode').checked&&ws&&ws.readyState===WebSocket.OPEN){
+    nextAutoAt=(Math.floor(Date.now()/60000)+1)*60000;
+    predictNow(true);
+  }
+});
+$('tf').addEventListener('change',()=>{
+  if($('autoMode').checked&&ws&&ws.readyState===WebSocket.OPEN){
+    nextAutoAt=(Math.floor(Date.now()/60000)+1)*60000;
+    predictNow(true);
+  }
+});
+</script></body></html>
