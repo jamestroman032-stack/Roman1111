@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Deriv Rise/Fall · 15 Indicator Analyzer</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}
+body{margin:0;background:#091321;color:#edf3ff;font:15px system-ui}
+main{max-width:900px;margin:auto;padding:18px}
+.card{background:#132137;border:1px solid #2b405e;border-radius:15px;padding:16px;margin:12px 0}
+.muted,small{color:#a0b1c8}.small{font-size:12px}.price{font-size:30px;font-weight:800}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:145px}
+input,select,button{width:100%;padding:12px;border-radius:9px;background:#1c304d;color:white;border:1px solid #405878;font:inherit}
+button{background:#2468c9;font-weight:bold;cursor:pointer}button:disabled{opacity:.55;cursor:wait}
+.secondary{background:#344761}.signal{font-size:30px;font-weight:900}
+.rise{color:#21c997}.fall{color:#ff6577}.skip{color:#f4bd50}
+.ind{padding:10px;background:#0d192b;border-radius:9px;margin:7px 0}
+.ind b{display:block}.buy{color:#21c997}.sell{color:#ff6577}.neutral{color:#f4bd50}
+.status-dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#f4bd50;margin-right:6px}
+.status-dot.on{background:#21c997}.status-dot.off{background:#ff6577}
+.note{line-height:1.5}.pill{display:inline-block;padding:4px 8px;border-radius:20px;background:#203653;margin:3px}
+.chart-wrap{height:300px;position:relative;width:100%;margin-top:12px;background:#0b1728;border:1px solid #263c58;border-radius:10px;overflow:hidden}
+#liveChart{display:block;width:100%;height:100%}.chart-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:#a9bad0;margin-top:8px}.chart-dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+.contract-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.contract-cell{background:#0d192b;border-radius:9px;padding:10px;min-width:0}.contract-cell small{display:block;color:#9fb0c7}.contract-cell b{display:block;overflow-wrap:anywhere}
+
+#connect,#startTrading{background:#2563eb!important;color:#fff!important;border:1px solid #3b82f6!important;transition:background .15s ease,border-color .15s ease}
+#connect.is-running,#startTrading.is-running{background:#dc2626!important;border-color:#ef4444!important}
+</style></head>
+<body><main>
+<h1>Deriv · Rise/Fall Indicator Analyzer</h1>
+<p class="muted">15 directional indicator readings · 30% lean threshold · Live Deriv feed · Auto-update every minute</p>
+
+<div class="card">
+  <b>Deriv connection</b>
+  <div class="row" style="margin-top:10px">
+    <label>Deriv App ID
+      <input id="appId" inputmode="numeric" autocomplete="off" placeholder="Your Deriv App ID">
+    </label>
+    <label>Deriv API Token / PAT
+      <input id="apiToken" type="password" autocomplete="off" placeholder="Paste your Deriv PAT">
+    </label>
+  </div>
+  <p><button id="connect" style="width:100%">CONNECT TO DERIV</button></p>
+  <p class="small note">Enter the same App ID and PAT used by your working Matrix bot. Never enter your Deriv password.</p>
+  <div id="connection" class="small"><span class="status-dot"></span>Not connected</div>
+</div>
+
+<div class="card">
+  <small>LIVE MARKET PRICE</small>
+  <div id="price" class="price">—</div>
+  <div id="feed" class="small">Connect to Deriv to load available markets.</div>
+  <div id="count" class="small">No candles loaded</div>
+</div>
+
+
+
+
+<div class="card">
+  <b>Prediction settings</b>
+  <div class="row" style="margin-top:10px">
+    <label>Deriv market<select id="asset" disabled><option value="">Connect to load markets</option></select></label>
+    <label>Timeframe<select id="tf">
+      <option value="15">15 seconds</option><option value="30" selected>30 seconds</option>
+      <option value="60">1 minute</option><option value="120">2 minutes</option>
+      <option value="180">3 minutes</option>
+    </select></label>
+  </div>
+  <p><button id="predict" disabled>PREDICT NOW</button></p>
+  <div class="ind" style="margin-top:10px">
+    <label style="display:flex;align-items:center;gap:10px">
+      <input id="autoMode" type="checkbox" checked style="width:20px;height:20px;flex:0 0 auto">
+      <span><b>Automatic prediction every minute</b><small class="muted" style="display:block">Checks immediately when trading starts, then fetches fresh completed candles at 00:01 of each new minute.</small></span>
+    </label>
+    <p class="small" style="margin-bottom:0">Next automatic update: <b id="autoCountdown">Waiting for Deriv connection</b></p>
+    <p class="small" id="lastAuto" style="margin:5px 0 0">No automatic prediction yet</p>
+  </div>
+  <small class="note">Every prediction fetches fresh Deriv history and rebuilds completed candles for the selected timeframe. The timer counts down to 00:01 of the next minute. On startup, the bot analyzes immediately and can trade the first qualifying fresh lean. Bull Market Index (RDBULL) is selected first when available. Lean requires at least 30% of RISE/FALL directional votes on one side and a lead of at least 2 votes; ties and 1-vote leads are SKIP.</small>
+</div>
+
+<div class="card">
+  <small>OVERALL SIGNAL</small>
+  <div id="signal" class="signal skip">NEUTRAL — SKIP</div>
+  <div id="reason" class="muted">Connect to Deriv, select a market and tap Predict.</div>
+  <p>Indicator alignment: <b id="score">—</b></p>
+  <p>RISE: <b id="rise">—</b>　 FALL: <b id="fall">—</b>　 NEUTRAL: <b id="neutral">—</b></p>
+  <p>Suggested duration: <b id="expiry">—</b></p>
+</div>
+
+<div class="card"><b>Indicator breakdown · 15 votes + ATR filter</b>
+  <div id="indicators">
+    <div class="ind">Bollinger Bands<b>Waiting</b></div><div class="ind">EMA 9 / 21<b>Waiting</b></div>
+    <div class="ind">SMA 20 / 50<b>Waiting</b></div><div class="ind">RSI 14<b>Waiting</b></div>
+    <div class="ind">MACD<b>Waiting</b></div><div class="ind">Stochastic<b>Waiting</b></div>
+  </div>
+</div>
+<div class="card"><b>Data validation</b>
+  <p id="validation" class="small">No prediction yet. Missing, stale or incomplete data returns ERROR — DO NOT TRADE.</p>
+  <small class="note">A 15-indicator agreement is not a calibrated win probability or a guarantee. Synthetic indices can move rapidly. Test on a Deriv demo account before relying on any signal.</small>
+</div>
+
+<div class="card" id="liveChartPanel">
+  <b>LIVE CHART · CURRENT MARKET & CONTRACT</b>
+  <div class="row" style="margin-top:8px;align-items:center">
+    <div class="small" id="chartMarket">Waiting for live market</div>
+    <div class="small" id="chartCycle" style="text-align:right">Live cycle: waiting</div>
+  </div>
+  <div class="chart-entry-timer" style="display:flex;justify-content:space-between;align-items:center;gap:12px;background:#0d192b;border:1px solid #263c58;border-radius:9px;padding:10px 12px;margin:10px 0">
+    <div><small style="display:block;color:#9fb0c7">NEXT ANALYSIS / ENTRY TIMER</small><b id="entryCountdown" style="font-size:22px;font-variant-numeric:tabular-nums">--:--</b></div>
+    <div style="text-align:right"><small style="display:block;color:#9fb0c7">BOT ACTION</small><b id="entryCondition">Waiting for verified lean</b></div>
+  </div>
+  <div class="chart-wrap"><canvas id="liveChart"></canvas></div>
+<div class="card" id="winRateCard">
+  <small>TRADE HISTORY WIN RATE · THROUGH LATEST SETTLED TRADE</small>
+  <div id="liveWinRate" class="price">0.00%</div>
+  <div id="liveWinRateDetail" class="small">0 wins · 0 losses · 0 settled trades</div>
+</div>
+
+  <div class="chart-legend">
+    <span><i class="chart-dot" style="background:#21c997"></i>Rise candle</span>
+    <span><i class="chart-dot" style="background:#ff6577"></i>Fall candle</span>
+    <span><i class="chart-dot" style="background:#f4bd50"></i>Live price</span>
+    <span><i class="chart-dot" style="background:#65a5ff"></i>Contract entry</span>
+  </div>
+  <div class="contract-grid">
+    <div class="contract-cell"><small>CONTRACT STATUS</small><b id="chartContractStatus">No open contract</b></div>
+    <div class="contract-cell"><small>LIVE CONTRACT P/L</small><b id="chartContractPL">—</b></div>
+    <div class="contract-cell"><small>ENTRY PRICE</small><b id="chartEntry">—</b></div>
+    <div class="contract-cell"><small>CURRENT / EXIT PRICE</small><b id="chartCurrent">—</b></div>
+    <div class="contract-cell"><small>DIRECTION</small><b id="chartDirection">—</b></div>
+    <div class="contract-cell"><small>TIME TO EXPIRY</small><b id="chartExpiry">—</b></div>
+  </div>
+  <p class="small muted" id="chartHint">Connect to Deriv to display live candles. When a trade opens, contract details will appear here.</p>
+</div>
+
+<div class="card" id="tradingPanel">
+  <b>Trade control · verified lean only</b>
+  <p class="small muted">The bot will request a Rise/Fall contract only when the existing 30% directional threshold and minimum 2-vote lead are both satisfied. Ties, 1-vote leads and data errors are skipped.</p>
+  <div class="row">
+    <label>Account mode<select id="accountMode"><option value="demo">DEMO</option><option value="real">LIVE / REAL</option></select></label>
+    <label>Contract duration<select id="tradeDuration"><option value="30s">30 seconds</option><option value="1">1 minute</option><option value="2">2 minutes</option><option value="3">3 minutes</option><option value="5">5 minutes</option><option value="5t" selected>5 ticks</option><option value="10t">10 ticks</option></select></label>
+  </div>
+  <div class="row">
+    <label>Base stake<input id="baseStake" type="number" min="0.35" step="0.01" value="1"></label>
+    <label>After-loss multiplier<input id="martingale" type="number" min="1" max="5" step="0.1" value="2"></label>
+    <label>Maximum recovery steps<input id="maxSteps" type="number" min="0" max="20" step="1" value=""></label>
+    <label>Maximum stake<input id="maxStake" type="number" min="0.35" step="0.01" value=""></label>
+  </div>
+  <div class="row">
+    <label>Session stop loss<input id="stopLoss" type="number" min="0" step="0.01" value=""></label>
+    <label>Session take profit<input id="takeProfit" type="number" min="0" step="0.01" value="10"></label>
+  </div>
+  <div class="ind">
+    <label style="display:flex;align-items:center;gap:10px">
+      <input id="continuousMode" type="checkbox" style="width:20px;height:20px;flex:0 0 auto">
+      <span><b>Continuous mode</b><small class="muted" style="display:block">Keep scanning and trading every fresh verified lean after a loss.</small></span>
+    </label>
+    <label style="display:flex;align-items:center;gap:10px;margin-top:10px">
+      <input id="stopOnWin" type="checkbox" checked style="width:20px;height:20px;flex:0 0 auto">
+      <span><b>Stop after any win</b><small class="muted" style="display:block">One winning contract ends the session immediately, including a recovery win.</small></span>
+    </label>
+  </div>
+  <div class="row">
+    <button id="startTrading">CONNECT &amp; START TRADING</button>
+    <button id="stopTrading" class="secondary">STOP BOT</button>
+  </div>
+  <div class="row">
+    <div class="ind"><small>BOT STATUS</small><b id="botStatus">STOPPED</b></div>
+    <div class="ind"><small>ACCOUNT BALANCE</small><b id="accountBalance">—</b></div>
+    <div class="ind"><small>CURRENT STAKE</small><b id="currentStake">1.00</b></div>
+    <div class="ind"><small>RECOVERY STEP</small><b id="recoveryStep">0</b></div>
+  </div>
+  <div class="row">
+    <div class="ind"><small>SESSION P/L</small><b id="sessionPL">0.00</b></div>
+    <div class="ind"><small>TRADES · W / L</small><b id="tradeRecord">0 · 0 / 0</b></div>
+  </div>
+  <p id="tradeStatus" class="small note">Connect Deriv, then start the bot. Demo mode is recommended for testing.</p>
+</div>
+
+</main>
+
+<div class="card" id="tradeHistoryPanel">
+  <div class="row" style="align-items:center">
+    <div><b>TRADE HISTORY</b><div class="small muted" id="historyCount">0 settled trades recorded</div></div>
+    <div><button id="downloadHistory" class="secondary" type="button">DOWNLOAD TRADE HISTORY (CSV)</button></div>
+  </div>
+  <div class="small muted" style="margin-top:8px">Download includes settled trades, contract IDs, direction, stake, entry/exit prices, duration, result and profit/loss.</div>
+  <div id="historyPreview" class="small muted" style="margin-top:10px">No settled trades yet.</div>
+</div>
+
+<script>
+const $=x=>document.getElementById(x);
+const API='https://api.derivws.com';
+const PUBLIC_WS='wss://api.derivws.com/trading/v1/options/ws/public';
+let ws=null, authWs=null, requestSeq=1, pending=new Map(), tickSub=null, liveSymbol='', lastQuote=null, activeMarkets=[];
+let chartBars=[], chartLiveBar=null, chartContract=null, chartFrame=null;
+function setConn(text,kind='wait'){
+  const dot=kind==='on'?'on':kind==='off'?'off':'';
+  $('connection').innerHTML='<span class="status-dot '+dot+'"></span>'+text;
+}
+function send(obj){
+  if(!ws||ws.readyState!==WebSocket.OPEN) throw Error('Not connected to Deriv. Tap CONNECT TO DERIV.');
+  ws.send(JSON.stringify(obj));
+}
+function request(obj,timeoutMs=18000){
+  return new Promise((resolve,reject)=>{
+    const req_id=requestSeq++;
+    const timer=setTimeout(()=>{pending.delete(req_id);reject(Error('Deriv request timed out. Check connection and try again.'))},timeoutMs);
+    pending.set(req_id,{resolve,reject,timer});
+    send({...obj,req_id});
+  });
+}
+function closeSocket(){
+  if(ws){try{ws.close()}catch(e){}}
+  ws=null; pending.forEach(p=>{clearTimeout(p.timer);p.reject(Error('Deriv connection closed'))});pending.clear();
+}
+async function derivApi(path,method='GET'){
+  const app=$('appId').value.trim(),pat=$('apiToken').value.trim();
+  if(!app)throw Error('Enter your Deriv App ID.');
+  if(!pat)throw Error('Enter your Deriv API Token/PAT.');
+  let response;
+  try{response=await fetch(API+path,{method,mode:'cors',cache:'no-store',
+    headers:{'Authorization':'Bearer '+pat,'Deriv-App-ID':app,'Accept':'application/json','Content-Type':'application/json'}})}
+  catch(e){throw Error('Deriv REST connection failed: '+e.message)}
+  let data={};try{data=await response.json()}catch(e){throw Error('Deriv returned an invalid response (HTTP '+response.status+').')}
+  if(!response.ok||data.errors?.length){const er=data.errors?.[0];throw Error((er?.code||'HTTP_'+response.status)+': '+(er?.message||data.message||'Deriv API rejected the request'))}
+  return data;
+}
+function openSocket(url,label){
+  return new Promise((resolve,reject)=>{
+    const socket=new WebSocket(url);let finished=false;
+    const timer=setTimeout(()=>{if(!finished){finished=true;try{socket.close()}catch(e){}reject(Error(label+' connection timed out.'))}},15000);
+    socket.onopen=()=>{if(finished)return;finished=true;clearTimeout(timer);resolve(socket)};
+    socket.onerror=()=>{if(!finished){finished=true;clearTimeout(timer);reject(Error(label+' WebSocket could not open.'))}};
+  });
+}
+async function connect(){
+  $('connect').disabled=true;$('predict').disabled=true;setConn('Connecting with your Matrix App ID + PAT method…');
+  closeSocket();if(authWs){try{authWs.close()}catch(e){}authWs=null}
+  try{
+    const app=$('appId').value.trim(),pat=$('apiToken').value.trim();
+    if(!app)throw Error('Enter your Deriv App ID.');
+    if(!pat)throw Error('Enter your Deriv API Token/PAT.');
+    setConn('Step 1/4 · opening Deriv public market feed…');
+    ws=await openSocket(PUBLIC_WS,'Deriv public market');
+    ws.onmessage=ev=>{
+      let m;try{m=JSON.parse(ev.data)}catch(e){return}
+      if(m.req_id&&pending.has(m.req_id)){
+        const p=pending.get(m.req_id);pending.delete(m.req_id);clearTimeout(p.timer);
+        if(m.error)p.reject(Error(m.error.message||m.error.code||'Deriv market API error'));else p.resolve(m);
+        return;
+      }
+      if(m.msg_type==='tick'&&m.tick){
+        lastQuote=m.tick;
+        if(m.tick.symbol===liveSymbol){
+          lastQuote=m.tick;
+          $('price').textContent=Number(m.tick.quote).toFixed(5);$('feed').textContent='Deriv live tick · '+m.tick.symbol;
+          updateLiveChartTick(m.tick);
+        }
+      }
+      if(m.error)setConn(m.error.message||'Deriv market feed error','off');
+    };
+    ws.onclose=()=>{if($('predict').disabled===false){setConn('Deriv market feed disconnected. Reconnect to continue.','off');$('predict').disabled=true}};
+    setConn('Step 2/4 · validating App ID + PAT…');
+    const accounts=await derivApi('/trading/v1/options/accounts');
+    const list=Array.isArray(accounts.data)?accounts.data:(accounts.data?[accounts.data]:[]);
+    const active=list.filter(x=>String(x.status||'active').toLowerCase()==='active');
+    if(!active.length)throw Error('No active Deriv Options account was returned for this PAT.');
+    const wantedType=$('accountMode').value==='demo'?'demo':'real';
+    const matching=active.filter(x=>String(x.account_type||x.type||'').toLowerCase()===wantedType);
+    const pool=matching.length?matching:active.filter(x=>{
+      const id=String(x.account_id||x.loginid||'');
+      return wantedType==='demo'?/^VRTC/i.test(id):/^CR/i.test(id);
+    });
+    if(!pool.length)throw Error('No active '+wantedType.toUpperCase()+' Options account was found for this PAT. Check that your PAT has trade permission and the selected account exists.');
+    const account=pool.find(x=>String(x.currency||'').toUpperCase()==='USD')||pool[0];
+    setConn('Step 3/4 · requesting authenticated WebSocket OTP…');
+    const otp=await derivApi('/trading/v1/options/accounts/'+encodeURIComponent(account.account_id)+'/otp','POST');
+    const authUrl=otp?.data?.url||otp?.data?.websocket_url||otp?.data?.websocketUrl||otp?.data?.ws_url;
+    if(!authUrl)throw Error('Deriv did not return an authenticated WebSocket URL.');
+    setConn('Step 4/4 · opening authenticated Deriv session…');
+    authWs=await openSocket(authUrl,'Authenticated Deriv');
+    const r=await request({active_symbols:'brief'});
+    // New Deriv API uses underlying_symbol / underlying_symbol_name.
+    // Legacy responses use symbol / display_name. Accept both schemas.
+    activeMarkets=(Array.isArray(r.active_symbols)?r.active_symbols:[])
+      .filter(x=>x && x.is_trading_suspended!==1 && (x.underlying_symbol||x.symbol))
+      .map(x=>{
+        const code=String(x.underlying_symbol||x.symbol||'').trim();
+        const name=String(x.underlying_symbol_name||x.display_name||code).trim();
+        return {...x, symbol:code, display_name:name};
+      })
+      .filter(x=>x.symbol);
+    if(!activeMarkets.length)throw Error('Deriv connected, but no valid active market symbols were returned.');
+    const preferredMarket = x => /volatility|step|bull|bear/i.test((x.display_name||'')+' '+(x.symbol||''));
+    activeMarkets.sort((x,y)=>(Number(preferredMarket(y))-Number(preferredMarket(x))) ||
+      String(x.display_name||x.symbol).localeCompare(String(y.display_name||y.symbol)));
+    $('asset').innerHTML=activeMarkets.map(x=>'<option value="'+escapeHtml(x.symbol)+'">'+escapeHtml(x.display_name||x.symbol)+' ('+escapeHtml(x.symbol)+')</option>').join('');
+    // Bull Market Index is the default market on every fresh connection.
+    // Match both the display name and Deriv's RDBULL symbol for API compatibility.
+    const tickProposalUnsupported=new Set(['R_10','R_25','R_50','R_75','R_100','RDBULL','RDBEAR']);
+    const wantsTicks=$('tradeDuration').value.endsWith('t');
+    const initialMarket=wantsTicks
+      ? (activeMarkets.find(x=>!tickProposalUnsupported.has(String(x.symbol||'').toUpperCase())) || null)
+      : activeMarkets.find(x=>
+          /bull\s*market\s*index/i.test(x.display_name||'') ||
+          /\bRDBULL\b/i.test(x.symbol||'')
+        );
+    if(initialMarket)$('asset').value=initialMarket.symbol;
+    if(wantsTicks&&!initialMarket)tradeSay('No listed market is available for streaming 5-tick proposals. Select a supported market or change duration.');
+    $('asset').disabled=false;$('predict').disabled=false;
+    setConn('Connected · App ID + PAT verified · '+activeMarkets.length+' Deriv markets loaded','on');
+    // Trading is a separate connection. A trading-socket failure must never
+    // tear down the already-working authenticated market feed or predictions.
+    $('feed').textContent='Deriv authenticated connection · live market feed';
+    subscribeSelected();startAutoMode();
+    try {
+      await connectTradeSocket();
+    } catch (tradeError) {
+      tradeAuthorized=false;
+      tradeSay('Market feed is connected; trading socket failed: '+tradeError.message+'. Press CONNECT & START again after checking your PAT permissions.');
+    }
+    return !!(ws&&ws.readyState===WebSocket.OPEN&&tradeAuthorized&&tradeWs&&tradeWs.readyState===WebSocket.OPEN);
+  }catch(e){
+    setConn(e.message,'off');$('feed').textContent=e.message;closeSocket();
+    if(authWs){try{authWs.close()}catch(e){}authWs=null}
+    return false;
+  }finally{$('connect').disabled=false}
+}
+function escapeHtml(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+async function subscribeSelected(){
+  if(!ws||ws.readyState!==WebSocket.OPEN)return;
+  const sym=$('asset').value;if(!sym)return;
+  try{
+    if(tickSub)send({forget:tickSub});
+    liveSymbol=sym;lastQuote=null;chartBars=[];chartLiveBar=null;chartContract=null;renderContractPanel();drawLiveChart();
+    const r=await request({ticks:sym,subscribe:1});
+    tickSub=r.subscription&&r.subscription.id||null;
+    if(r.tick){lastQuote=r.tick;$('price').textContent=Number(r.tick.quote).toFixed(5);updateLiveChartTick(r.tick)}
+    $('feed').textContent='Deriv live tick · '+sym;
+  }catch(e){$('feed').textContent=e.message}
+}
+$('asset').addEventListener('change',subscribeSelected);
+$('connect').addEventListener('click',connect);
+
+function toBarsFromTicks(history,seconds){
+  const times=history.times||[],prices=history.prices||[],groups=new Map();
+  for(let i=0;i<Math.min(times.length,prices.length);i++){
+    const t=Number(times[i]),p=Number(prices[i]);if(!Number.isFinite(t)||!Number.isFinite(p))continue;
+    const bucket=Math.floor(t/seconds)*seconds;
+    let b=groups.get(bucket);
+    if(!b){b={epoch:bucket,open:p,high:p,low:p,close:p,n:0};groups.set(bucket,b)}
+    b.high=Math.max(b.high,p);b.low=Math.min(b.low,p);b.close=p;b.n++;
+  }
+  const now=Math.floor(Date.now()/1000);
+  return [...groups.values()].filter(b=>b.epoch+seconds<=now).sort((a,b)=>a.epoch-b.epoch);
+}
+function toBarsFromCandles(candles,seconds){
+  const groups=new Map();
+  for(const c of candles||[]){
+    const t=Number(c.epoch),o=Number(c.open),h=Number(c.high),l=Number(c.low),cl=Number(c.close);
+    if(![t,o,h,l,cl].every(Number.isFinite))continue;
+    const bucket=Math.floor(t/seconds)*seconds;
+    let b=groups.get(bucket);
+    if(!b){b={epoch:bucket,open:o,high:h,low:l,close:cl,n:0};groups.set(bucket,b)}
+    b.high=Math.max(b.high,h);b.low=Math.min(b.low,l);b.close=cl;b.n++;
+  }
+  const now=Math.floor(Date.now()/1000),sourceSeconds=60;
+  return [...groups.values()].filter(b=>b.epoch+seconds<=now && b.n===seconds/sourceSeconds).sort((a,b)=>a.epoch-b.epoch);
+}
+async function getMarketHistory(){
+  const symbol=$('asset').value,seconds=Number($('tf').value);
+  if(!symbol)throw Error('Select a Deriv market first.');
+  let bars;
+  if(seconds<60){
+    const r=await request({ticks_history:symbol,adjust_start_time:1,count:5000,end:'latest',start:1,style:'ticks'},25000);
+    bars=toBarsFromTicks(r.history||{},seconds);
+  }else{
+    const r=await request({ticks_history:symbol,adjust_start_time:1,count:300,end:'latest',granularity:60,start:1,style:'candles'},25000);
+    bars=toBarsFromCandles(r.candles||[],seconds);
+  }
+  if(bars.length<60)throw Error('Only '+bars.length+' completed candles were returned; at least 60 are required. Try a faster market or a longer timeframe.');
+  const age=Date.now()/1000-(bars[bars.length-1].epoch+seconds);
+  if(age>Math.max(seconds*3,180))throw Error('Latest completed candle is stale. Market may be closed or feed delayed.');
+  return bars;
+}
+const avg=a=>a.reduce((s,x)=>s+x,0)/a.length;
+function ema(a,n){let z=Array(n-1).fill(null);if(a.length<n)return z;let v=avg(a.slice(0,n));z.push(v);for(let i=n;i<a.length;i++){v=a[i]*2/(n+1)+v*(1-2/(n+1));z.push(v)}return z}
+function sma(a,n){return a.map((_,i)=>i<n-1?null:avg(a.slice(i-n+1,i+1)))}
+function rsi(a){let o=Array(a.length).fill(null);for(let i=14;i<a.length;i++){let g=0,l=0;for(let j=i-13;j<=i;j++){let d=a[j]-a[j-1];if(d>0)g+=d;else l-=d}o[i]=l===0?100:100-100/(1+g/l)}return o}
+function sd(a){let m=avg(a);return Math.sqrt(avg(a.map(x=>(x-m)**2)))}
+function macd(a){let x=ema(a,12),y=ema(a,26),line=a.map((_,i)=>x[i]==null||y[i]==null?null:x[i]-y[i]),v=line.filter(x=>x!=null),s=ema(v,9),sig=Array(a.length).fill(null),j=0;line.forEach((x,i)=>{if(x!=null)sig[i]=s[j++]});return{line,sig,h:line.map((x,i)=>x==null||sig[i]==null?null:x-sig[i])}}
+function stoch(cs){let raw=cs.map((c,i)=>{if(i<13)return null;let w=cs.slice(i-13,i+1),hi=Math.max(...w.map(x=>x.high)),lo=Math.min(...w.map(x=>x.low));return hi===lo?50:(c.close-lo)/(hi-lo)*100}),k=raw.map((x,i)=>i<15||raw.slice(i-2,i+1).some(y=>y==null)?null:avg(raw.slice(i-2,i+1))),d=k.map((x,i)=>i<2||k.slice(i-2,i+1).some(y=>y==null)?null:avg(k.slice(i-2,i+1)));return{k,d}}
+function aggregate(bars){let g={};for(let b of bars.filter(x=>!x.isOpen)){let t=Date.parse(b.openTime)/1000,k=Math.floor(t/180)*180,x=g[k]||(g[k]={epoch:k,open:+b.open,high:+b.high,low:+b.low,close:+b.close,n:0});x.high=Math.max(x.high,+b.high);x.low=Math.min(x.low,+b.low);x.close=+b.close;x.n++}return Object.values(g).filter(x=>x.n===3).sort((a,b)=>a.epoch-b.epoch)}
+function normalize(bars){return bars.filter(x=>!x.isOpen).map(x=>({epoch:Date.parse(x.openTime)/1000,open:+x.open,high:+x.high,low:+x.low,close:+x.close})).filter(x=>Object.values(x).every(Number.isFinite)).sort((a,b)=>a.epoch-b.epoch)}
+function wilder(values,period){
+ let out=Array(values.length).fill(null);if(values.length<=period)return out;
+ let v=avg(values.slice(1,period+1));out[period]=v;
+ for(let i=period+1;i<values.length;i++)out[i]=(out[i-1]*(period-1)+values[i])/period;
+ return out;
+}
+function rollingMean(a,n){return a.map((_,i)=>i<n-1?null:avg(a.slice(i-n+1,i+1)))}
+function typical(c){return (c.high+c.low+c.close)/3}
+function extraIndicators(cs){
+ const n=cs.length,cl=cs.map(x=>x.close),hi=cs.map(x=>x.high),lo=cs.map(x=>x.low),i=n-1,p=i-1,out=[];
+ const add=(name,v,why)=>out.push([name,v,why]);
+ // Ichimoku Cloud: Tenkan 9, Kijun 26, Senkou B 52; cloud compared with current price.
+ const midRange=(end,len)=>{let h=Math.max(...hi.slice(end-len+1,end+1)),l=Math.min(...lo.slice(end-len+1,end+1));return (h+l)/2};
+ if(n>=52){let ten=midRange(i,9), kij=midRange(i,26), spanA=(ten+kij)/2, spanB=midRange(i,52),top=Math.max(spanA,spanB),bot=Math.min(spanA,spanB);
+  add('Ichimoku Cloud',cl[i]>top&&ten>kij?'BUY':cl[i]<bot&&ten<kij?'SELL':'NEUTRAL','Tenkan/Kijun and price vs cloud');
+ }else add('Ichimoku Cloud','NEUTRAL','Insufficient lookback');
+ // ADX 14 with directional movement.
+ let plus=[],minus=[],trs=[];
+ for(let j=0;j<n;j++){if(j===0){plus.push(0);minus.push(0);trs.push(hi[j]-lo[j]);continue}
+  let up=hi[j]-hi[j-1],dn=lo[j-1]-lo[j];
+  plus.push(up>dn&&up>0?up:0);minus.push(dn>up&&dn>0?dn:0);
+  trs.push(Math.max(hi[j]-lo[j],Math.abs(hi[j]-cl[j-1]),Math.abs(lo[j]-cl[j-1])));
+ }
+ let atrW=wilder(trs,14),pW=wilder(plus,14),mW=wilder(minus,14),dx=Array(n).fill(null);
+ for(let j=14;j<n;j++){if(atrW[j]){let pdi=100*pW[j]/atrW[j],mdi=100*mW[j]/atrW[j];dx[j]=pdi+mdi?100*Math.abs(pdi-mdi)/(pdi+mdi):0}}
+ let adx=wilder(dx.map(x=>x??0),14),pdi=atrW[i]?100*pW[i]/atrW[i]:0,mdi=atrW[i]?100*mW[i]/atrW[i]:0;
+ add('ADX 14',adx[i]>=20?(pdi>mdi?'BUY':'SELL'):'NEUTRAL',`ADX ${adx[i]?.toFixed(1)??'—'} · ${adx[i]>=20?'trend strength active':'weak trend'}`);
+ // Momentum 10.
+ let mom=cl[i]-cl[i-10];add('Momentum 10',mom>0?'BUY':mom<0?'SELL':'NEUTRAL',`10-bar momentum ${mom.toFixed(5)}`);
+ // CCI 20.
+ let tp=cs.map(typical),cci='NEUTRAL',cciVal=0;
+ if(n>=20){let t=tp.slice(i-19,i+1),ma=avg(t),dev=avg(t.map(x=>Math.abs(x-ma)));cciVal=dev?((tp[i]-ma)/(.015*dev)):0;cci=cciVal>100?'BUY':cciVal< -100?'SELL':'NEUTRAL'}
+ add('CCI 20',cci,`CCI ${cciVal.toFixed(1)}`);
+ // Awesome Oscillator (median price SMA 5 - SMA 34).
+ let med=cs.map(x=>(x.high+x.low)/2),ao5=rollingMean(med,5),ao34=rollingMean(med,34),ao=ao5[i]-ao34[i],aoPrev=ao5[p]-ao34[p];
+ add('Awesome Oscillator',ao>0&&ao>aoPrev?'BUY':ao<0&&ao<aoPrev?'SELL':'NEUTRAL',`AO ${ao.toFixed(5)} · ${ao>aoPrev?'rising':'falling'}`);
+ // Fractals: latest confirmed 5-bar pivot.
+ let upFr=null,dnFr=null;
+ for(let j=2;j<n-2;j++){if(hi[j]>hi[j-1]&&hi[j]>hi[j-2]&&hi[j]>hi[j+1]&&hi[j]>hi[j+2])upFr=hi[j];
+  if(lo[j]<lo[j-1]&&lo[j]<lo[j-2]&&lo[j]<lo[j+1]&&lo[j]<lo[j+2])dnFr=lo[j]}
+ add('Fractals',upFr!==null&&cl[i]>upFr?'BUY':dnFr!==null&&cl[i]<dnFr?'SELL':'NEUTRAL',`Last swing high ${upFr?.toFixed(5)??'—'} / low ${dnFr?.toFixed(5)??'—'}`);
+ // Parabolic SAR (classic iterative approximation, acceleration .02, max .20).
+ let bull=cl[1]>=cl[0],af=.02,ep=bull?hi[0]:lo[0],sar=bull?lo[0]:hi[0];
+ for(let j=1;j<n;j++){let next=sar+af*(ep-sar);
+  if(bull){next=Math.min(next,lo[j-1],j>1?lo[j-2]:lo[j-1]);if(lo[j]<next){bull=false;next=ep;ep=lo[j];af=.02}else if(hi[j]>ep){ep=hi[j];af=Math.min(.2,af+.02)}}
+  else{next=Math.max(next,hi[j-1],j>1?hi[j-2]:hi[j-1]);if(hi[j]>next){bull=true;next=ep;ep=hi[j];af=.02}else if(lo[j]<ep){ep=lo[j];af=Math.min(.2,af+.02)}}
+  sar=next;
+ }
+ add('Parabolic SAR',cl[i]>sar?'BUY':'SELL',`SAR ${sar.toFixed(5)} · price ${cl[i]>sar?'above':'below'} SAR`);
+ // Moving Average confirmation (SMA 20 / 50).
+ let ma20=rollingMean(cl,20),ma50=rollingMean(cl,50);
+ // Moving-average coverage is already represented by the primary EMA 9/21 and SMA 20/50 votes.
+ // Fractal Chaos Bands approximated from the most recent confirmed fractal levels.
+ add('Fractal Chaos Bands',upFr!==null&&cl[i]>upFr?'BUY':dnFr!==null&&cl[i]<dnFr?'SELL':'NEUTRAL','Price vs latest confirmed fractal range');
+ // Alligator: smoothed moving averages (SMMA) of median price.
+ function smma(arr,len){let z=Array(arr.length).fill(null);if(arr.length<len)return z;z[len-1]=avg(arr.slice(0,len));for(let j=len;j<arr.length;j++)z[j]=(z[j-1]*(len-1)+arr[j])/len;return z}
+ let jaw=smma(med,13),teeth=smma(med,8),lips=smma(med,5);
+ add('Alligator',lips[i]>teeth[i]&&teeth[i]>jaw[i]?'BUY':lips[i]<teeth[i]&&teeth[i]<jaw[i]?'SELL':'NEUTRAL','Lips / teeth / jaw alignment');
+ // ATR 14, displayed as volatility filter, not directional vote.
+ let atrVal=atrW[i],atrPct=atrVal/cl[i]*100;
+ add('ATR 14','INFO',`ATR ${atrVal?.toFixed(5)??'—'} · ${atrPct.toFixed(3)}% of price`);
+ return out;
+}
+function analyze(cs){
+ let a=cs.map(x=>x.close),i=a.length-1,p=i-1,c=cs[i],prev=cs[p],v=[];
+ let z=a.slice(i-19,i+1),m=avg(z),s=sd(z),u=m+2*s,l=m-2*s,t='NEUTRAL',w='No clear band rejection or breakout';
+ if(c.low<=l&&c.close>l&&c.close>c.open){t='BUY';w='Rejected lower band upward'}else if(c.high>=u&&c.close<u&&c.close<c.open){t='SELL';w='Rejected upper band downward'}else if(c.close>u&&c.close>c.open&&prev.close<=u){t='BUY';w='Bullish close above upper band'}else if(c.close<l&&c.close<c.open&&prev.close>=l){t='SELL';w='Bearish close below lower band'}v.push(['Bollinger Bands',t,w]);
+ let e9=ema(a,9),e21=ema(a,21);t='NEUTRAL';w='EMA trend not aligned';if(e9[i]>e21[i]&&e9[i]>e9[p]&&e21[i]>=e21[p]&&c.close>e9[i]){t='BUY';w='Price above rising EMA pair'}else if(e9[i]<e21[i]&&e9[i]<e9[p]&&e21[i]<=e21[p]&&c.close<e9[i]){t='SELL';w='Price below falling EMA pair'}v.push(['EMA 9 / 21',t,w]);
+ let s20=sma(a,20),s50=sma(a,50);t='NEUTRAL';w='Price not aligned with SMA pair';if(c.close>s20[i]&&s20[i]>s50[i]){t='BUY';w='Price above bullish SMA stack'}else if(c.close<s20[i]&&s20[i]<s50[i]){t='SELL';w='Price below bearish SMA stack'}v.push(['SMA 20 / 50',t,w]);
+ let rr=rsi(a),rv=rr[i];t='NEUTRAL';w='RSI '+rv.toFixed(1)+' neutral';if(rv<30&&rv>rr[p]){t='BUY';w='Oversold RSI turning up'}else if(rv>70&&rv<rr[p]){t='SELL';w='Overbought RSI turning down'}else if(rv>=55&&rv>rr[p]){t='BUY';w='RSI bullish momentum'}else if(rv<=45&&rv<rr[p]){t='SELL';w='RSI bearish momentum'}v.push(['RSI 14',t,w]);
+ let md=macd(a),h=md.h[i],ph=md.h[p];t='NEUTRAL';w='MACD histogram not expanding';if(md.line[i]>md.sig[i]&&h>0&&h>ph){t='BUY';w='Bullish MACD histogram expanding'}else if(md.line[i]<md.sig[i]&&h<0&&h<ph){t='SELL';w='Bearish MACD histogram expanding'}v.push(['MACD 12 / 26 / 9',t,w]);
+ let st=stoch(cs),k=st.k[i],d=st.d[i];t='NEUTRAL';w='%K '+k.toFixed(1)+' / %D '+d.toFixed(1)+' no extreme cross';if(st.k[p]<=st.d[p]&&k>d&&k<20&&d<25){t='BUY';w='%K crossed above %D below 20'}else if(st.k[p]>=st.d[p]&&k<d&&k>80&&d>75){t='SELL';w='%K crossed below %D above 80'}v.push(['Stochastic 14 / 3 / 3',t,w]);
+ const extra=extraIndicators(cs);
+ // All 15 directional readings participate. ATR is a volatility measurement,
+ // not a directional vote, so it is shown separately and excluded from the tally.
+ const allVotes=v.concat(extra.filter(x=>x[1]==='BUY'||x[1]==='SELL'||x[1]==='NEUTRAL'));
+ const buy=allVotes.filter(x=>x[1]==='BUY').length;
+ const sell=allVotes.filter(x=>x[1]==='SELL').length;
+ const neutral=allVotes.filter(x=>x[1]==='NEUTRAL').length;
+ const total=allVotes.length;
+ const directionalTotal=buy+sell;
+ const signalThreshold=Math.ceil(directionalTotal*0.30);
+ const margin=Math.abs(buy-sell);
+ const dominant=Math.max(buy,sell);
+ const dominantPct=directionalTotal?Math.round(dominant/directionalTotal*100):0;
+ let signal='NEUTRAL — SKIP',cls='skip',reason=`No lean: at least 30% of directional votes must support one side, with a lead of 2 or more votes.`;
+ if(directionalTotal===0){reason='NO DIRECTIONAL VOTES — SKIP. All indicators are neutral.'}
+ else if(buy>sell && buy>=signalThreshold && margin>=2){signal='RISE LEAN';cls='call';reason=`RISE ${buy} vs FALL ${sell}. RISE has ${dominantPct}% of directional votes and leads by ${margin}; 30% minimum met.`}
+ else if(sell>buy && sell>=signalThreshold && margin>=2){signal='FALL LEAN';cls='put';reason=`FALL ${sell} vs RISE ${buy}. FALL has ${dominantPct}% of directional votes and leads by ${margin}; 30% minimum met.`}
+ else if(buy===sell){reason=`DRAW — SKIP. RISE ${buy} and FALL ${sell} are tied.`}
+ else if(margin===1){reason=`TOO CLOSE — SKIP. RISE ${buy}, FALL ${sell}; only a 1-vote lead.`}
+ else {reason=`NO LEAN — SKIP. RISE ${buy}, FALL ${sell}; 30% directional-vote threshold not met.`}
+ return{v,buy,sell,neutral,total,signal,cls,reason,extra};
+}
+
+let autoTimer=null,nextAutoAt=0,predictionBusy=false,lastAutoRun=0,tradeOnNextAnalysis=false;
+let tradeHistory=[];
+let tradeWs=null, tradeReq=700000, tradePending=null, tradeRunning=false;
+let sessionStake=1, recoveryStep=0, sessionPL=0, wins=0, losses=0, tradeCount=0;
+let lastTradedCandleKey='', selectedAccountCurrency='USD', tradeAuthorized=false;
+
+
+function chartFmt(v){
+  if(v===null||v===undefined||!Number.isFinite(Number(v)))return '—';
+  return Number(v).toFixed(5);
+}
+function renderContractPanel(){
+  const c=chartContract;
+  $('chartContractStatus').textContent=c?c.status:'No open contract';
+  $('chartContractPL').textContent=c?((Number(c.profit)>=0?'+':'')+money(Number(c.profit||0))):'—';
+  $('chartContractPL').style.color=c?(Number(c.profit)>=0?'#21c997':'#ff6577'):'';
+  $('chartEntry').textContent=c?chartFmt(c.entry):'—';
+  $('chartCurrent').textContent=c?chartFmt(c.current??(lastQuote&&lastQuote.symbol===liveSymbol?lastQuote.quote:null)):'—';
+  $('chartDirection').textContent=c?c.direction:'—';
+  let remain='—';
+  if(c&&c.expiry){const exp=Number(c.expiry);if(Number.isFinite(exp)){const sec=Math.max(0,exp-Math.floor(Date.now()/1000));remain=sec+'s';}}
+  $('chartExpiry').textContent=remain;
+  if(c)$('chartHint').textContent='Contract #'+(c.contractId||'—')+' · Entry and live price are shown against the chart where available.';
+}
+function updateLiveChartTick(tick){
+  const price=Number(tick.quote),epoch=Number(tick.epoch||Date.now()/1000);
+  if(!Number.isFinite(price))return;
+  const tf=Number($('tf').value)||60,bucket=Math.floor(epoch/tf)*tf;
+  if(!chartLiveBar||chartLiveBar.epoch!==bucket){
+    if(chartLiveBar&&(!chartBars.length||chartLiveBar.epoch>chartBars[chartBars.length-1].epoch)){
+      chartBars.push({...chartLiveBar});chartBars=chartBars.slice(-100);
+    }
+    chartLiveBar={epoch:bucket,open:price,high:price,low:price,close:price,n:1};
+  }else{
+    chartLiveBar.high=Math.max(chartLiveBar.high,price);
+    chartLiveBar.low=Math.min(chartLiveBar.low,price);
+    chartLiveBar.close=price;chartLiveBar.n++;
+  }
+  $('chartCycle').textContent='Live cycle: '+new Date(bucket*1000).toLocaleTimeString()+' → '+new Date((bucket+tf)*1000).toLocaleTimeString();
+  $('chartMarket').textContent=$('asset').selectedOptions[0]?.textContent||liveSymbol||'Live market';
+  if(chartContract){chartContract.current=price;renderContractPanel()}
+  drawLiveChart();
+}
+function drawLiveChart(){
+  const canvas=$('liveChart');if(!canvas)return;
+  const rect=canvas.getBoundingClientRect();if(!rect.width||!rect.height)return;
+  const dpr=Math.min(window.devicePixelRatio||1,2),w=Math.floor(rect.width*dpr),h=Math.floor(rect.height*dpr);
+  if(canvas.width!==w||canvas.height!==h){canvas.width=w;canvas.height=h}
+  const ctx=canvas.getContext('2d');ctx.clearRect(0,0,w,h);
+  const pad={l:12*dpr,r:68*dpr,t:14*dpr,b:22*dpr};
+  const data=chartBars.slice(-65).map(x=>({...x}));
+  if(chartLiveBar)data.push({...chartLiveBar});
+  if(!data.length){
+    ctx.fillStyle='#a9bad0';ctx.font=`${13*dpr}px system-ui`;ctx.fillText('Waiting for live candle data…',pad.l,35*dpr);return;
+  }
+  const prices=data.flatMap(b=>[b.high,b.low]);
+  if(lastQuote&&lastQuote.symbol===liveSymbol)prices.push(Number(lastQuote.quote));
+  if(chartContract&&Number.isFinite(Number(chartContract.entry)))prices.push(Number(chartContract.entry));
+  let min=Math.min(...prices),max=Math.max(...prices);if(min===max){min-=1;max+=1}
+  const spread=(max-min)*.08;min-=spread;max+=spread;
+  const cw=w-pad.l-pad.r,ch=h-pad.t-pad.b;
+  const y=v=>pad.t+(max-v)/(max-min)*ch;
+  const xStep=cw/data.length,bodyW=Math.max(2*dpr,Math.min(9*dpr,xStep*.58));
+  ctx.strokeStyle='#20344e';ctx.lineWidth=1*dpr;
+  for(let i=0;i<5;i++){const yy=pad.t+ch*i/4;ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(w-pad.r,yy);ctx.stroke();ctx.fillStyle='#91a4bd';ctx.font=`${9*dpr}px system-ui`;ctx.fillText((max-(max-min)*i/4).toFixed(3),w-pad.r+5*dpr,yy+3*dpr)}
+  data.forEach((b,i)=>{
+    const cx=pad.l+xStep*(i+.5),up=b.close>=b.open,color=up?'#21c997':'#ff6577';
+    ctx.strokeStyle=color;ctx.fillStyle=color;ctx.lineWidth=1.3*dpr;
+    ctx.beginPath();ctx.moveTo(cx,y(b.high));ctx.lineTo(cx,y(b.low));ctx.stroke();
+    const top=Math.min(y(b.open),y(b.close)),bh=Math.max(1.5*dpr,Math.abs(y(b.open)-y(b.close)));
+    ctx.fillRect(cx-bodyW/2,top,bodyW,bh);
+  });
+  const live=chartLiveBar?chartLiveBar.close:(lastQuote&&lastQuote.symbol===liveSymbol?Number(lastQuote.quote):data[data.length-1].close);
+  if(Number.isFinite(live)){
+    const yy=y(live);ctx.setLineDash([4*dpr,3*dpr]);ctx.strokeStyle='#f4bd50';ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(w-pad.r,yy);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#f4bd50';ctx.fillRect(w-pad.r+2*dpr,yy-8*dpr,64*dpr,16*dpr);ctx.fillStyle='#101b2a';ctx.font=`bold ${9*dpr}px system-ui`;ctx.fillText(live.toFixed(3),w-pad.r+5*dpr,yy+3*dpr);
+  }
+  if(chartContract&&Number.isFinite(Number(chartContract.entry))){
+    const yy=y(Number(chartContract.entry));ctx.setLineDash([3*dpr,3*dpr]);ctx.strokeStyle='#65a5ff';ctx.beginPath();ctx.moveTo(pad.l,yy);ctx.lineTo(w-pad.r,yy);ctx.stroke();ctx.setLineDash([]);
+  }
+}
+window.addEventListener('resize',drawLiveChart);
+
+async function predictNow(isAutomatic=false){
+  if(predictionBusy){if(tradeRunning)tradeOnNextAnalysis=true;return;}
+  if(!ws||ws.readyState!==WebSocket.OPEN){
+    if(isAutomatic)$('autoCountdown').textContent='Waiting for Deriv connection';
+    return;
+  }
+  predictionBusy=true;
+  const b=$('predict');b.disabled=true;b.textContent=isAutomatic?'AUTO UPDATING…':'FETCHING DERIV DATA…';
+  $('signal').textContent='WAIT';$('signal').className='signal skip';
+  try{
+    const bars=await getMarketHistory();
+    const r=analyze(bars);
+    const selected=$('asset').selectedOptions[0];
+    $('price').textContent=lastQuote&&lastQuote.symbol===$('asset').value?Number(lastQuote.quote).toFixed(5):Number(bars.at(-1).close).toFixed(5);
+    $('feed').textContent=(selected?selected.textContent:$('asset').value)+' · Deriv WebSocket · '+$('tf').selectedOptions[0].textContent;
+    $('count').textContent=bars.length+' completed candles · last candle '+new Date(bars.at(-1).epoch*1000).toLocaleString();
+    $('signal').textContent=r.signal.replace('CALL','RISE').replace('PUT','FALL');
+    $('signal').className='signal '+(r.cls==='call'?'rise':r.cls==='put'?'fall':'skip');
+    $('reason').textContent=r.reason.replaceAll('bullish','RISE').replaceAll('bearish','FALL');
+    $('score').textContent=Math.max(r.buy,r.sell)+'/'+(r.buy+r.sell)+' directional votes ('+Math.round((r.buy+r.sell)?Math.max(r.buy,r.sell)/(r.buy+r.sell)*100:0)+'%) · 30% minimum; 2-vote lead';
+    $('rise').textContent=r.buy;$('fall').textContent=r.sell;$('neutral').textContent=r.neutral;
+    $('expiry').textContent=$('tf').selectedOptions[0].textContent+' (one candle)';
+    $('indicators').innerHTML=r.v.concat(r.extra).map(x=>'<div class="ind">'+escapeHtml(x[0])+'<b class="'+(x[1]==='BUY'?'buy':x[1]==='SELL'?'sell':'neutral')+'">'+(x[1]==='BUY'?'RISE':x[1]==='SELL'?'FALL':x[1])+'</b><small>'+escapeHtml(x[2])+'</small></div>').join('');
+    $('validation').textContent='Deriv history validated · '+bars.length+' completed candles · latest candle '+new Date(bars.at(-1).epoch*1000).toISOString();
+    if(isAutomatic){lastAutoRun=Date.now();$('lastAuto').textContent='Last automatic update: '+new Date(lastAutoRun).toLocaleTimeString()}
+    if(tradeRunning&&(isAutomatic||tradeOnNextAnalysis)){tradeOnNextAnalysis=false;maybeTradeVerifiedLean(r,bars);}
+  }catch(e){
+    tradeOnNextAnalysis=false;
+    $('signal').textContent='ERROR — DO NOT TRADE';$('signal').className='signal fall';
+    $('reason').textContent=e.message;$('validation').textContent=e.message;
+    if(isAutomatic)$('lastAuto').textContent='Automatic update failed: '+e.message;
+  }finally{
+    predictionBusy=false;b.disabled=!(ws&&ws.readyState===WebSocket.OPEN);b.textContent='PREDICT NOW';
+  }
+}
+$('predict').onclick=()=>predictNow(false);
+function stopAutoMode(){
+  if(autoTimer){clearInterval(autoTimer);autoTimer=null}
+  nextAutoAt=0;$('autoCountdown').textContent='Paused';
+}
+function updateEntryCountdown(){
+  const el=$('entryCountdown'),condition=$('entryCondition');
+  if(!el||!condition)return;
+  if(!tradeRunning){
+    el.textContent='--:--';
+    condition.textContent='Bot stopped';
+    return;
+  }
+  if(!ws||ws.readyState!==WebSocket.OPEN||!nextAutoAt){
+    el.textContent='--:--';
+    condition.textContent='Waiting for Deriv connection';
+    return;
+  }
+  const left=Math.max(0,Math.ceil((nextAutoAt-Date.now())/1000));
+  el.textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+  condition.textContent=tradePending?'Contract in progress':(predictionBusy?'Analyzing next lean':(tradeOnNextAnalysis?'Startup analysis queued':'Waiting for next candle close'));
+}
+function selectedCandleSeconds(){
+  const n=Number($('tf').value);
+  return Number.isFinite(n)&&n>0?n:60;
+}
+function nextCandleAnalysisAt(now=Date.now()){
+  const span=selectedCandleSeconds()*1000;
+  // Wait for the active candle to close, then allow one second for Deriv
+  // to publish it as completed history.
+  return (Math.floor(now/span)+1)*span+1000;
+}
+function startAutoMode(){
+  stopAutoMode();
+  if(!$('autoMode').checked){$('autoCountdown').textContent='Paused';return}
+  if(!ws||ws.readyState!==WebSocket.OPEN){$('autoCountdown').textContent='Waiting for Deriv connection';return}
+  nextAutoAt=nextCandleAnalysisAt();
+  $('autoCountdown').textContent='Waiting for next candle close…';
+  autoTimer=setInterval(()=>{
+    if(!$('autoMode').checked){stopAutoMode();return}
+    if(!ws||ws.readyState!==WebSocket.OPEN){$('autoCountdown').textContent='Waiting for Deriv connection';return}
+    const now=Date.now();
+    if(now>=nextAutoAt){
+      nextAutoAt=nextCandleAnalysisAt(now);
+      predictNow(true);
+    }
+    const left=Math.max(0,Math.ceil((nextAutoAt-now)/1000));
+    $('autoCountdown').textContent=String(Math.floor(left/60)).padStart(2,'0')+':'+String(left%60).padStart(2,'0');
+    updateEntryCountdown();
+  },100);
+}
+$('autoMode').addEventListener('change',()=>{
+  if($('autoMode').checked)startAutoMode();else stopAutoMode();
+});
+$('asset').addEventListener('change',()=>{
+  if($('autoMode').checked&&ws&&ws.readyState===WebSocket.OPEN){
+    nextAutoAt=nextCandleAnalysisAt();
+    $('autoCountdown').textContent='Waiting for next candle close…';
+  }
+});
+$('tf').addEventListener('change',()=>{
+  if($('autoMode').checked&&ws&&ws.readyState===WebSocket.OPEN){
+    nextAutoAt=nextCandleAnalysisAt();
+    $('autoCountdown').textContent='Waiting for next candle close…';
+  }
+});
+
+function tradeSay(s){$('tradeStatus').textContent=s}
+function tradeReqId(){return ++tradeReq}
+function tradeSend(o){
+  if(!tradeWs||tradeWs.readyState!==WebSocket.OPEN)throw Error('Trading WebSocket is disconnected.');
+  tradeWs.send(JSON.stringify({...o,req_id:tradeReqId()}));
+}
+function money(n){return Number(n||0).toFixed(2)}
+function updateConnectionButtonColors(){
+  const running=!!tradeRunning;
+  ['connect','startTrading'].forEach(id=>{
+    const el=$(id);if(!el)return;
+    el.classList.toggle('is-running',running);
+    el.setAttribute('aria-pressed',running?'true':'false');
+  });
+}
+
+function updateLiveWinRate(){
+  // Recalculate from the complete recorded trade history, including the latest settlement.
+  const recorded=tradeHistory;
+  const historyWins=recorded.filter(x=>x.result==='WIN').length;
+  const historyLosses=recorded.filter(x=>x.result==='LOSS').length;
+  const breakeven=recorded.filter(x=>x.result==='BREAKEVEN').length;
+  const decided=historyWins+historyLosses;
+  const rate=decided?historyWins/decided*100:0;
+  const value=$('liveWinRate'),detail=$('liveWinRateDetail');
+  if(value)value.textContent=rate.toFixed(2)+'%';
+  if(detail)detail.textContent=historyWins+' wins · '+historyLosses+' losses · '+breakeven+' breakeven · '+recorded.length+' total trades (latest included)';
+}
+function updateTradeUI(){
+  $('botStatus').textContent=tradeRunning?'RUNNING':'STOPPED';
+  $('currentStake').textContent=money(sessionStake);
+  $('recoveryStep').textContent=String(recoveryStep);
+  $('sessionPL').textContent=money(sessionPL);
+  $('tradeRecord').textContent=tradeCount+' · '+wins+' / '+losses;
+  updateConnectionButtonColors();
+}
+async function connectTradeSocket(){
+  tradeAuthorized=false;
+  if(!authWs||authWs.readyState!==WebSocket.OPEN)
+    throw Error('Authenticated Options WebSocket is not open. Reconnect to Deriv.');
+  // Use the OTP-authenticated Options socket for trading; legacy v3 is not
+  // compatible with the current Matrix App ID + PAT connection workflow.
+  tradeWs=authWs;
+  tradeWs.onmessage=ev=>{
+    let m;try{m=JSON.parse(ev.data)}catch(e){return}
+    onTradeMessage(m);
+  };
+  tradeWs.onclose=()=>{
+    tradeAuthorized=false;
+    if(tradeRunning){tradeRunning=false;updateTradeUI();tradeSay('Authenticated trading connection closed. Bot stopped; reconnect before restarting.')}
+  };
+  tradeAuthorized=true;
+  try{tradeSend({balance:1,subscribe:1})}catch(e){}
+  tradeSay('Authenticated Options trading connection ready · '+$('accountMode').value.toUpperCase()+' account. Ready.');
+}
+function onTradeMessage(m){
+  if(m.msg_type==='balance'&&m.balance){$('accountBalance').textContent=money(m.balance.balance)+' '+(m.balance.currency||selectedAccountCurrency);return}
+  if(m.error){
+    const failedStage=tradePending?.stage||'request';
+    tradePending=null;
+    tradeSay('Deriv '+failedStage+' error: '+(m.error.message||m.error.code)+'. No order was confirmed; waiting for a new verified lean.');
+    if(['InvalidToken','AuthorizationRequired','Unauthorized','PermissionDenied'].includes(m.error.code)){
+      tradeAuthorized=false;tradeRunning=false;updateTradeUI();
+    }
+    return;
+  }
+  if((m.msg_type==='proposal'||m.proposal)&&tradePending?.stage==='proposal'){
+    if(!m.proposal?.id){tradePending=null;tradeSay('Deriv returned no buyable proposal ID. This market/duration may not support streaming proposals; choose another market or contract duration.');return}
+    tradePending.stage='buy';
+    tradeSend({buy:m.proposal.id,price:Number(m.proposal.ask_price||sessionStake)});
+    tradeSay('Proposal received · sending purchase request…');
+    return;
+  }
+  if((m.msg_type==='buy'||m.buy)&&tradePending?.stage==='buy'){
+    const id=m.buy?.contract_id;
+    if(!id){tradePending=null;tradeSay('Deriv did not confirm the purchase.');return}
+    tradePending.stage='open';tradePending.contractId=id;
+    chartContract={direction:tradePending.direction,entry:null,current:null,profit:0,expiry:null,status:'OPEN',contractId:id};
+    renderContractPanel();
+    tradeSend({proposal_open_contract:1,contract_id:id,subscribe:1});
+    tradeSay('Purchase confirmed · contract '+id+' · monitoring settlement…');
+    return;
+  }
+  if((m.msg_type==='proposal_open_contract'||m.proposal_open_contract)&&tradePending?.stage==='open'){
+    const c=m.proposal_open_contract;
+    if(String(c.contract_id)!==String(tradePending.contractId))return;
+    chartContract=chartContract||{direction:tradePending.direction};
+    chartContract.entry=c.entry_spot??chartContract.entry;
+    chartContract.current=c.current_spot??c.exit_spot??chartContract.current;
+    chartContract.profit=Number(c.profit||0);
+    chartContract.expiry=c.date_expiry||c.expiry_time||chartContract.expiry;
+    chartContract.status=c.is_sold?'SETTLED':String(c.status||'OPEN').toUpperCase();
+    renderContractPanel();
+    if(c.is_sold||['won','lost','sold'].includes(String(c.status||'').toLowerCase()))settleTrade(Number(c.profit||0),c);
+  }
+}
+function maybeTradeVerifiedLean(r,bars){
+  if(!tradeRunning||!tradeAuthorized||tradePending||!bars?.length)return;
+  if(r.signal!=='RISE LEAN'&&r.signal!=='FALL LEAN')return;
+  const candle=bars[bars.length-1];
+  const key=$('asset').value+':'+candle.epoch+':'+r.signal;
+  if(key===lastTradedCandleKey)return;
+  lastTradedCandleKey=key;
+  const direction=r.signal==='RISE LEAN'?'RISE':'FALL';
+  const duration=$('tradeDuration').value;
+  const isTicks=duration.endsWith('t');
+  const isSeconds=duration.endsWith('s');
+  if(isTicks && new Set(['R_10','R_25','R_50','R_75','R_100','RDBULL','RDBEAR']).has(String($('asset').value).toUpperCase())){
+    tradeSay('5-tick trading is unavailable on this market because Deriv does not stream buyable tick proposals for it. Select another market or choose a seconds/minutes contract.');
+    return;
+  }
+  const durationValue=(isTicks||isSeconds)?Number(duration.slice(0,-1)):Number(duration);
+  const durationUnit=isTicks?'t':(isSeconds?'s':'m');
+  const durationLabel=isTicks?duration:(durationValue+' '+(isSeconds?'second':'minute')+(durationValue>1?'s':''));
+  const req={
+    proposal:1, amount:sessionStake, basis:'stake',
+    contract_type:direction==='RISE'?'CALL':'PUT',
+    currency:selectedAccountCurrency, underlying_symbol:$('asset').value,
+    duration:durationValue,
+    duration_unit:durationUnit, subscribe:1
+  };
+  tradePending={stage:'proposal',direction,market:$('asset').selectedOptions[0]?.textContent||$('asset').value,symbol:$('asset').value,candle:candle.epoch,stake:sessionStake,duration:durationLabel,startedAt:new Date().toISOString(),contractId:null};
+  try{tradeSend(req);tradeSay('Verified '+direction+' lean · requesting '+durationLabel+' contract.')}
+  catch(e){tradePending=null;tradeSay(e.message)}
+}
+function csvCell(v){const x=String(v??'');return '"'+x.replace(/"/g,'""')+'"'}
+function renderTradeHistory(){
+  $('historyCount').textContent=tradeHistory.length+' settled trade'+(tradeHistory.length===1?'':'s')+' recorded';
+  $('historyPreview').textContent=tradeHistory.length?tradeHistory.slice(-5).reverse().map(x=>`${x.result} · ${x.direction} · ${x.market} · ${money(x.profit_loss)} ${selectedAccountCurrency}`).join(' | '):'No settled trades yet.';
+}
+$('downloadHistory').addEventListener('click',()=>{
+  if(!tradeHistory.length){tradeSay('No settled trades to download yet.');return;}
+  const cols=['time','contract_id','market','symbol','direction','stake','duration','entry_price','exit_price','profit_loss','result','session_profit_loss'];
+  const lines=[cols.join(','),...tradeHistory.map(row=>cols.map(k=>csvCell(row[k])).join(','))];
+  const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8;'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='deriv-trade-history-'+new Date().toISOString().slice(0,10)+'.csv';document.body.appendChild(a);a.click();a.remove();URL.revokeObjectURL(url);
+});
+function settleTrade(profit,c){
+  const p=tradePending;if(!p)return;
+  tradePending=null;tradeCount++;sessionPL+=profit;
+  tradeHistory.push({time:new Date().toISOString(),contract_id:p.contractId||c.contract_id||'',market:p.market||'',symbol:p.symbol||'',direction:p.direction||'',stake:p.stake??'',duration:p.duration||'',entry_price:c.entry_spot??chartContract?.entry??'',exit_price:c.exit_spot??c.current_spot??chartContract?.current??'',profit_loss:profit,result:profit>0?'WIN':profit<0?'LOSS':'BREAKEVEN',session_profit_loss:sessionPL});
+  renderTradeHistory();
+  updateLiveWinRate();
+  if(chartContract){chartContract.status=profit>0?'WON':'LOST';chartContract.profit=profit;renderContractPanel()}
+  if(profit>0){
+    wins++;sessionStake=Number($('baseStake').value)||1;recoveryStep=0;
+    tradeSay('WIN · '+money(profit)+' profit. '+($('stopOnWin').checked?'Stopping after first win.':'Base stake restored.'));
+    if($('stopOnWin').checked)tradeRunning=false;
+  }else{
+    losses++;recoveryStep++;
+    const mult=Math.max(1,Number($('martingale').value)||2);
+    const capInput=$('maxStake').value.trim();const cap=capInput===''?Infinity:Math.max(Number($('baseStake').value)||1,Number(capInput));
+    const next=(Number($('baseStake').value)||1)*Math.pow(mult,recoveryStep);
+    const maxStepsInput=$('maxSteps').value.trim();const maxSteps=maxStepsInput===''?Infinity:Number(maxStepsInput);
+    if(recoveryStep>maxSteps||next>cap){
+      tradeRunning=false;tradeSay('LOSS · '+money(profit)+'. Recovery limit reached; bot stopped.');
+    }else{
+      sessionStake=Number(next.toFixed(2));
+      tradeSay('LOSS · '+money(profit)+'. Next recovery stake '+money(sessionStake)+'.');
+    }
+  }
+  if(Number($('stopLoss').value)>0&&sessionPL<=-Math.abs(Number($('stopLoss').value))){tradeRunning=false;tradeSay('Session stop-loss reached. Bot stopped.')}
+  if(Number($('takeProfit').value)>0&&sessionPL>=Math.abs(Number($('takeProfit').value))){tradeRunning=false;tradeSay('Session take-profit reached. Bot stopped.')}
+  updateTradeUI();
+  if(!tradeRunning)$('startTrading').disabled=false;
+}
+$('startTrading').addEventListener('click',async()=>{
+  const btn=$('startTrading');
+  if(tradeRunning)return;
+  btn.disabled=true;btn.textContent='CONNECTING…';
+  try{
+    const marketReady=ws&&ws.readyState===WebSocket.OPEN;
+    const tradeReady=tradeAuthorized&&tradeWs&&tradeWs.readyState===WebSocket.OPEN;
+    if(!marketReady||!tradeReady){
+      const ok=await connect();
+      if(!ok)throw Error('Connection/authorization was not completed. Check your App ID, PAT permissions and account mode.');
+    }
+    if(!tradeAuthorized||!tradeWs||tradeWs.readyState!==WebSocket.OPEN)throw Error('Authenticated trading connection is not ready.');
+    if(!ws||ws.readyState!==WebSocket.OPEN)throw Error('Market feed is not connected.');
+    const base=Number($('baseStake').value),capInput=$('maxStake').value.trim(),cap=capInput===''?Infinity:Number(capInput);
+    if(!(base>0)||!(cap>=base))throw Error('Check base stake and maximum stake.');
+    sessionStake=base;recoveryStep=0;sessionPL=0;wins=0;losses=0;tradeCount=0;lastTradedCandleKey='';updateLiveWinRate();
+    tradeRunning=true;tradeOnNextAnalysis=true;updateTradeUI();updateEntryCountdown();
+    tradeSay('Connected and trading started · running an immediate fresh analysis, then scanning each completed '+$('tf').selectedOptions[0].textContent+' candle. Only a qualifying RISE/FALL lean will place an order.');
+    if(!$('autoMode').checked)$('autoMode').checked=true;
+    startAutoMode();
+    predictNow(true);
+  }catch(e){
+    tradeRunning=false;updateTradeUI();tradeSay(e.message);
+  }finally{
+    btn.disabled=false;btn.textContent='CONNECT & START TRADING';
+  }
+});
+
+$('stopTrading').addEventListener('click',()=>{
+  tradeRunning=false;tradeOnNextAnalysis=false;updateTradeUI();updateEntryCountdown();tradeSay(tradePending?.stage==='open'?'Bot stopped. Existing open contract will still be monitored.':'Bot stopped.');
+});
+
+
+updateConnectionButtonColors();
+</script></body></html>
